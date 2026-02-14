@@ -79,6 +79,14 @@ config IBM_ASM
 	  for information on the specific driver level and support statement
 	  for your IBM server.
 
+config MMIO_INIT_HELPER
+	bool "Generic early MMIO init helper"
+	depends on OF && HAS_IOMEM
+	help
+	  Add a tiny DT-driven helper for one-shot MMIO writes early
+	  during boot. Intended for temporary bring-up quirks when a register
+	  write must be performed before a dedicated driver exists.
+
 config IBMVMC
 	tristate "IBM Virtual Management Channel support"
 	depends on PPC_PSERIES
