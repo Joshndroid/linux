@@ -6,7 +6,9 @@
  */
 #include <linux/console.h>
 #include <linux/component.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/of_graph.h>
 #include <linux/phy/phy.h>
@@ -3723,13 +3725,16 @@ static ssize_t exynos_drm_dp_store_hpd_irq(struct device *dev,
 {
 	struct exynos_drm_dp *drm_dp = dev_get_drvdata(dev);
 	struct exynos_dp_subdev *dp = drm_dp->subdev;
+	int ret;
 
 	if (dp->hpd_state == HPD_UNPLUG) {
 		dp_log_err(dp->dev, "hpd state unplug\n");
 		return -EACCES;
 	}
 
-	kstrtobool(buf, &dp->dp_debug.debug_hpd_irq);
+	ret = kstrtobool(buf, &dp->dp_debug.debug_hpd_irq);
+	if (ret)
+		return ret;
 
 	queue_delayed_work(dp->dp_wq, &dp->hpd_irq_work, 0);
 
@@ -3763,13 +3768,16 @@ static ssize_t exynos_drm_dp_store_set_lt(struct device *dev,
 {
 	struct exynos_drm_dp *drm_dp = dev_get_drvdata(dev);
 	struct exynos_dp_subdev *dp = drm_dp->subdev;
+	int ret;
 
 	if (dp->hpd_state == HPD_UNPLUG) {
 		dp_log_err(dp->dev, "hpd state unplug\n");
 		return -EACCES;
 	}
 
-	kstrtou32(buf, 0, &dp->dp_debug.debug_lt);
+	ret = kstrtou32(buf, 0, &dp->dp_debug.debug_lt);
+	if (ret)
+		return ret;
 
 	return len;
 }
