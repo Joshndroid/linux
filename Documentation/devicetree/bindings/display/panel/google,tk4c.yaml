@@ -27,12 +27,26 @@ properties:
   reset-gpios:
     maxItems: 1
 
+  vddi-supply: true
+
+  vci-supply: true
+
+  vddd-supply: true
+
+  vddd-select-gpios:
+    maxItems: 1
+    description: VDDD voltage selector, held low for the TK4C panel.
+
   port: true
 
 required:
   - compatible
   - reg
   - reset-gpios
+  - vddi-supply
+  - vci-supply
+  - vddd-supply
+  - vddd-select-gpios
   - port
 
 unevaluatedProperties: false
@@ -47,6 +61,10 @@ examples:
             compatible = "google,gs-tk4c";
             reg = <0>;
             reset-gpios = <&gpp0 0 0>;
+            vddi-supply = <&vddi>;
+            vci-supply = <&vci>;
+            vddd-supply = <&vddd>;
+            vddd-select-gpios = <&gpp21 5 0>;
 
             port {
                 panel_in: endpoint {

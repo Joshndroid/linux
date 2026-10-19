@@ -13,6 +13,8 @@
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/pm_runtime.h>
+#include <linux/regulator/consumer.h>
 
 #include <video/mipi_display.h>
 
@@ -29,6 +31,11 @@ struct tokay_panel {
 	struct mipi_dsi_device *dsi;
 	struct drm_connector *connector;
 	struct gpio_desc *reset_gpio;
+	struct gpio_desc *vddd_select_gpio;
+	struct regulator *vddi;
+	struct regulator *vci;
+	struct regulator *vddd;
+	bool vddd_on;
 };
 
 /* Production TK4C PPS configuration (DSC 1.2a, two 540-pixel slices). */
@@ -108,38 +115,76 @@ static const struct drm_display_mode tokay_modes[] = {
 
 static int tokay_panel_unprepare(struct drm_panel *panel)
 {
-	return 0;
+	struct tokay_panel *ctx = to_tokay_panel(panel);
+	int ret, err;
+
+	ret = 0;
+	if (ctx->vddd_on) {
+		ret = regulator_disable(ctx->vddd);
+		if (!ret)
+			ctx->vddd_on = false;
+	}
+	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
+	err = regulator_disable(ctx->vci);
+	if (!ret)
+		ret = err;
+	err = regulator_disable(ctx->vddi);
+	return ret ? ret : err;
 }
 
 static int tokay_panel_prepare(struct drm_panel *panel)
 {
 	struct tokay_panel *ctx = to_tokay_panel(panel);
+	int ret;
 
-	/* Downstream TK4C reset timing: low 1 ms, high 1 ms. */
-	if (ctx->reset_gpio) {
-		gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-		usleep_range(1000, 1100);
-		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-		usleep_range(1000, 1100);
-	}
+	/* Google TK4C prepare: VDDI, VCI +10ms; reset/VDDD belong to enable.
+	 * Keep the factory's fixed-low VDDD selector; do not infer a voltage.
+	 */
+	ret = regulator_enable(ctx->vddi);
+	if (ret)
+		return ret;
+	ret = regulator_enable(ctx->vci);
+	if (ret)
+		goto disable_vddi;
+	usleep_range(10000, 11000);
 
 	return 0;
+
+disable_vddi:
+	regulator_disable(ctx->vddi);
+	return ret;
 }
 
 static int tokay_panel_disable(struct drm_panel *panel)
 {
 	struct tokay_panel *ctx = to_tokay_panel(panel);
+	int ret;
 
-	mipi_dsi_dcs_set_display_off(ctx->dsi);
+	ret = mipi_dsi_dcs_set_display_off(ctx->dsi);
+	if (ret < 0)
+		return ret;
+	ret = mipi_dsi_dcs_enter_sleep_mode(ctx->dsi);
+	/* Vendor TK4C off_cmdset waits after sleep-in before power removal. */
 	msleep(120);
-	mipi_dsi_dcs_enter_sleep_mode(ctx->dsi);
-
-	return 0;
+	return ret;
 }
 
-#define tk4c_cmd(dsi, seq...)						\
-	mipi_dsi_dcs_write_buffer((dsi), (const u8[]){ seq },		\
-				  sizeof((const u8[]){ seq }))
+/* Stop at the first failed init command; FIFO drain alone is not panel ACK. */
+#define tk4c_cmd(dsi, seq...) do { \
+	ret = mipi_dsi_dcs_write_buffer((dsi), (const u8[]){ seq }, \
+				 sizeof((const u8[]){ seq })); \
+	if (ret < 0) \
+		goto power_off; \
+} while (0)
+
+static void tokay_power_diagnostic(struct tokay_panel *ctx, const char *stage)
+{
+	u8 power = 0;
+	ssize_t n = mipi_dsi_dcs_read(ctx->dsi, MIPI_DCS_GET_POWER_MODE, &power, 1);
+
+	dev_info(&ctx->dsi->dev, "TK4C %s power read=%zd value=%#x\n",
+		 stage, n, power);
+}
 
 static int tokay_cur_vrefresh(struct tokay_panel *ctx)
 {
@@ -157,12 +202,50 @@ static int tokay_panel_enable(struct drm_panel *panel)
 	struct tokay_panel *ctx = to_tokay_panel(panel);
 	struct mipi_dsi_device *dsi = ctx->dsi;
 	struct drm_dsc_picture_parameter_set pps;
-	int ret;
+	u8 power;
+	int ret, attempt;
 
-	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
-	if (ret < 0)
+	/* Match tk4c_enable/gs_panel_reset_helper: reset here, after prepare. */
+	if (ctx->vddd_on)
+		return -EBUSY;
+	ret = gpiod_direction_output(ctx->reset_gpio, 0);
+	if (ret)
 		return ret;
-	msleep(120);
+	usleep_range(1000, 1100);
+	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+	usleep_range(1000, 1100);
+	ret = regulator_enable(ctx->vddd);
+	if (ret) {
+		gpiod_set_value_cansleep(ctx->reset_gpio, 0);
+		return ret;
+	}
+	ctx->vddd_on = true;
+	usleep_range(5000, 6000);
+
+	/* FIFO-empty is not proof that the DDIC left sleep. On this board the
+	 * first cold-start command can leave GET_POWER_MODE at reset value 08h;
+	 * repeating the standard sleep-out command has produced visible output
+	 * and power mode 9dh on hardware. Check the actual state before sending
+	 * configuration. Bound retries and unwind instead of claiming success.
+	 */
+	for (attempt = 0; attempt < 3; attempt++) {
+		ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
+		if (ret < 0)
+			goto power_off;
+		msleep(120);
+		ret = mipi_dsi_dcs_get_power_mode(dsi, &power);
+		if (ret < 0)
+			goto power_off;
+		dev_info(&dsi->dev, "sleep-out attempt %d power=%#x\n",
+			 attempt + 1, power);
+		if (power & MIPI_DSI_DCS_POWER_MODE_SLEEP)
+			break;
+	}
+	if (attempt == 3) {
+		ret = -ETIMEDOUT;
+		goto power_off;
+	}
+	tokay_power_diagnostic(ctx, "after-sleep-out");
 
 	/* TK4C normal-mode init, retaining MTP-programmed TE/FGZ values. */
 	tk4c_cmd(dsi, MIPI_DCS_SET_TEAR_ON);
@@ -189,17 +272,30 @@ static int tokay_panel_enable(struct drm_panel *panel)
 
 	ret = mipi_dsi_compression_mode(dsi, true);
 	if (ret < 0)
-		dev_err(&dsi->dev, "failed to enable DSC: %d\n", ret);
+		goto power_off;
 
 	drm_dsc_pps_payload_pack(&pps, &tokay_tk4c_dsc);
 	ret = mipi_dsi_picture_parameter_set(dsi, &pps);
 	if (ret < 0)
-		dev_err(&dsi->dev, "failed to send DSC PPS: %d\n", ret);
+		goto power_off;
 
 	tk4c_cmd(dsi, 0x9D, 0x01);
 	tk4c_cmd(dsi, MIPI_DCS_WRITE_CONTROL_DISPLAY, 0x20);
 
-	return mipi_dsi_dcs_set_display_on(dsi);
+	ret = mipi_dsi_dcs_set_display_on(dsi);
+	if (ret < 0)
+		goto power_off;
+	msleep(20);
+	tokay_power_diagnostic(ctx, "after-display-on");
+	return 0;
+
+power_off:
+	if (!regulator_disable(ctx->vddd))
+		ctx->vddd_on = false;
+	else
+		dev_err(&dsi->dev, "failed to disable VDDD after init error\n");
+	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
+	return ret;
 }
 
 static int tokay_panel_get_modes(struct drm_panel *panel,
@@ -246,8 +342,21 @@ static int tokay_bl_update_status(struct backlight_device *bl)
 	return mipi_dsi_dcs_set_display_brightness_large(ctx->dsi, brightness);
 }
 
+static int tokay_bl_get_brightness(struct backlight_device *bl)
+{
+	struct tokay_panel *ctx = bl_get_data(bl);
+	u16 brightness;
+	int ret;
+
+	if (!ctx->panel.enabled)
+		return 0;
+	ret = mipi_dsi_dcs_get_display_brightness_large(ctx->dsi, &brightness);
+	return ret < 0 ? ret : brightness;
+}
+
 static const struct backlight_ops tokay_bl_ops = {
 	.update_status = tokay_bl_update_status,
+	.get_brightness = tokay_bl_get_brightness,
 };
 
 static int tokay_panel_backlight_init(struct tokay_panel *ctx)
@@ -269,6 +378,78 @@ static int tokay_panel_backlight_init(struct tokay_panel *ctx)
 	return 0;
 }
 
+/* Lab-only standard DCS readback. Never request panel power or change mode. */
+static ssize_t lab_dcs_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
+{
+	struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
+	struct tokay_panel *ctx = mipi_dsi_get_drvdata(dsi);
+	static const u8 commands[] = {
+		MIPI_DCS_GET_POWER_MODE,
+		MIPI_DCS_GET_DISPLAY_MODE,
+		MIPI_DCS_GET_SIGNAL_MODE,
+		MIPI_DCS_GET_DIAGNOSTIC_RESULT,
+		MIPI_DCS_GET_CONTROL_DISPLAY,
+	};
+	ssize_t n;
+	int i, len = 0, ret;
+	u8 value;
+	u16 brightness;
+
+	if (!ctx || !ctx->panel.enabled)
+		return sysfs_emit(buf, "inactive\n");
+	ret = pm_runtime_get_if_in_use(dev->parent);
+	if (ret <= 0)
+		return sysfs_emit(buf, "inactive\n");
+	for (i = 0; i < ARRAY_SIZE(commands); i++) {
+		value = 0;
+		n = mipi_dsi_dcs_read(dsi, commands[i], &value, 1);
+		len += sysfs_emit_at(buf, len, "command=%02x result=%zd value=%02x\n",
+				    commands[i], n, value);
+	}
+	ret = mipi_dsi_dcs_get_display_brightness_large(dsi, &brightness);
+	len += sysfs_emit_at(buf, len, "brightness_result=%d brightness=%u\n",
+			    ret, ret < 0 ? 0 : brightness);
+	pm_runtime_put(dev->parent);
+	return len;
+}
+static DEVICE_ATTR_RO(lab_dcs);
+
+/* RAM-lab diagnostic only: repeat the standard wake command on an already
+ * enabled panel. No arbitrary DCS/register writes or power-rail changes.
+ * Keep normal transport flags; this isolates command timing first.
+ */
+static ssize_t lab_wake_store(struct device *dev,
+			     struct device_attribute *attr,
+			     const char *buf, size_t count)
+{
+	struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
+	struct tokay_panel *ctx = mipi_dsi_get_drvdata(dsi);
+	int ret;
+
+	if (!sysfs_streq(buf, "sleep-out"))
+		return -EINVAL;
+	if (!ctx || !ctx->panel.enabled)
+		return -EAGAIN;
+	ret = pm_runtime_get_if_in_use(dev->parent);
+	if (ret <= 0)
+		return ret < 0 ? ret : -EAGAIN;
+	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
+	if (ret >= 0)
+		msleep(120);
+	pm_runtime_put(dev->parent);
+	return ret < 0 ? ret : count;
+}
+static DEVICE_ATTR_WO(lab_wake);
+static struct attribute *tokay_lab_attrs[] = {
+	&dev_attr_lab_dcs.attr,
+	&dev_attr_lab_wake.attr,
+	NULL,
+};
+static const struct attribute_group tokay_lab_group = {
+	.attrs = tokay_lab_attrs,
+};
+
 static int tokay_panel_probe(struct mipi_dsi_device *dsi)
 {
 	struct device *dev = &dsi->dev;
@@ -284,10 +465,23 @@ static int tokay_panel_probe(struct mipi_dsi_device *dsi)
 	ctx->dsi = dsi;
 	mipi_dsi_set_drvdata(dsi, ctx);
 
-	ctx->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_ASIS);
 	if (IS_ERR(ctx->reset_gpio))
 		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
 				     "failed to get reset gpio\n");
+	ctx->vddd_select_gpio = devm_gpiod_get(dev, "vddd-select", GPIOD_OUT_LOW);
+	if (IS_ERR(ctx->vddd_select_gpio))
+		return dev_err_probe(dev, PTR_ERR(ctx->vddd_select_gpio),
+				     "failed to get VDDD selector\n");
+	ctx->vddi = devm_regulator_get(dev, "vddi");
+	if (IS_ERR(ctx->vddi))
+		return dev_err_probe(dev, PTR_ERR(ctx->vddi), "failed to get VDDI\n");
+	ctx->vci = devm_regulator_get(dev, "vci");
+	if (IS_ERR(ctx->vci))
+		return dev_err_probe(dev, PTR_ERR(ctx->vci), "failed to get VCI\n");
+	ctx->vddd = devm_regulator_get(dev, "vddd");
+	if (IS_ERR(ctx->vddd))
+		return dev_err_probe(dev, PTR_ERR(ctx->vddd), "failed to get VDDD\n");
 
 	dsi->lanes = 4;
 	dsi->format = MIPI_DSI_FMT_RGB888;
@@ -301,6 +495,9 @@ static int tokay_panel_probe(struct mipi_dsi_device *dsi)
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to register backlight\n");
 
+	ret = devm_device_add_group(dev, &tokay_lab_group);
+	if (ret)
+		return ret;
 	drm_panel_add(&ctx->panel);
 
 	ret = mipi_dsi_attach(dsi);

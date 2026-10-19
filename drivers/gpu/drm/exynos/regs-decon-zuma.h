@@ -36,6 +36,7 @@
 #define ZD_GLOBAL_CON_DECON_EN_F		(1 << 0)
 
 #define ZD_TRIG_CON				(0x0030)
+#define ZD_HW_TE_CNT				(0x0038)
 #define ZD_HW_TRIG_SEL_MASK			(0x3 << 24)
 #define ZD_HW_TRIG_SEL_FROM_NONE		(3 << 24)
 #define ZD_HW_TRIG_SEL_FROM_DDI0		(0 << 24)

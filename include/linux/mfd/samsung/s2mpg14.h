@@ -6,6 +6,8 @@
 #ifndef __LINUX_MFD_S2MPG14_H
 #define __LINUX_MFD_S2MPG14_H
 
+#include <linux/bits.h>
+
 /* Common registers (type 0x000) */
 enum s2mpg14_common_reg {
 	S2MPG14_COMMON_VGPIO0 = 0x0,
@@ -287,5 +289,35 @@ enum s2mpg14_regulators {
 #define S2MPG14_PCTRLSEL_PWREN_MIF_ACTIVE_N 0x7
 #define S2MPG14_PCTRLSEL_AOC_RET           0x8
 #define S2MPG14_PCTRLSEL_TPU_EN            0x9
+
+/* GPIO register definitions: Copyright 2025 Steffen Deusch; source pin recorded in provenance. */
+/*
+ * GPIO registers (type 0x00c).  Six general-purpose pins with one control
+ * register each, a status register holding all six input levels, and an
+ * interrupt block.
+ */
+enum s2mpg14_gpio_reg {
+	S2MPG14_GPIO_INT1 = 0x00,
+	S2MPG14_GPIO_INT2 = 0x01,
+	S2MPG14_GPIO_INT1M = 0x02,
+	S2MPG14_GPIO_INT2M = 0x03,
+	S2MPG14_GPIO_STATUS = 0x04,
+	S2MPG14_GPIO0_SET = 0x05,
+	S2MPG14_GPIO0_MONSEL = 0x0b,
+	S2MPG14_GPIO5_MONSEL = 0x10,
+};
+
+#define S2MPG14_GPIO_NR		6
+
+/*
+ * Bits in a GPIOn_SET register.  The same on the S2MPG15, whose GPIO block is
+ * this one widened, so these carry the family prefix.
+ */
+#define S2MPG1X_GPIO_SET_MODE		GENMASK(1, 0)
+#define S2MPG1X_GPIO_SET_DRV_STR	BIT(2)
+#define S2MPG1X_GPIO_SET_PULL_DOWN	BIT(3)
+#define S2MPG1X_GPIO_SET_PULL_UP	BIT(4)
+#define S2MPG1X_GPIO_SET_OUT		BIT(5)
+#define S2MPG1X_GPIO_SET_OEN		BIT(6)
 
 #endif /* __LINUX_MFD_S2MPG14_H */

@@ -23,6 +23,7 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/unaligned.h>
 
 #include <drm/display/drm_dsc.h>
@@ -493,6 +494,11 @@ static int zuma_dsc_ctrl0 = ZD_DSC_CONTROL0_BOOT_VALUE;
 module_param_named(dsc_ctrl0, zuma_dsc_ctrl0, int, 0644);
 MODULE_PARM_DESC(dsc_ctrl0, "DSC_CONTROL0 value (bootloader uses 0xE)");
 
+static bool zuma_dsc_full_pic_width;
+module_param_named(dsc_full_pic_width, zuma_dsc_full_pic_width, bool, 0644);
+MODULE_PARM_DESC(dsc_full_pic_width,
+		 "lab: keep the panel's full picture width in encoder PPS");
+
 static int zuma_dsc_dec_delay = -1;
 module_param_named(dsc_dec_delay, zuma_dsc_dec_delay, int, 0644);
 MODULE_PARM_DESC(dsc_dec_delay,
@@ -545,13 +551,11 @@ static void zuma_reg_dsc_config_control(u32 id, u32 dsc_id, u32 ds_en,
 }
 
 /*
- * Program one DSC encoder's PPS.
- *
- * Each encoder compresses one slice and its PPS describes *that slice* as the
- * picture, so pic_width is the slice width - the panel's own PPS, which the
- * panel driver sends to the DDIC, keeps the full picture width. Taking the
- * panel's config verbatim here left the encoders producing nothing and the
- * DSIM underrunning; the bootloader programs 640 where the panel says 1280.
+ * Program one DSC encoder's PPS. The original native path narrows picture
+ * width to one slice, based on Komodo bootloader observations. Pinned Google
+ * cal_9865 dsc_reg_set_pps instead prefers cfg->pic_width when supplied, and
+ * TK4C supplies 1080. Keep the old default for a controlled lab comparison;
+ * dsc_full_pic_width selects the source-verified vendor alternative.
  */
 static void zuma_reg_dsc_set_pps(u32 id, u32 dsc_id,
 				 const struct drm_dsc_config *cfg)
@@ -561,7 +565,8 @@ static void zuma_reg_dsc_set_pps(u32 id, u32 dsc_id,
 	const u8 *raw = (const u8 *)&pps;
 	int i;
 
-	enc_cfg.pic_width = cfg->slice_width;
+	if (!zuma_dsc_full_pic_width)
+		enc_cfg.pic_width = cfg->slice_width;
 	if (zuma_dsc_dec_delay >= 0)
 		enc_cfg.initial_dec_delay = zuma_dsc_dec_delay;
 
@@ -787,6 +792,49 @@ static void zuma_reg_set_win_enable(u32 id, u32 win, bool en)
 /* decon_cal_ops							      */
 /* ------------------------------------------------------------------ */
 
+/* Lab snapshot: only non-destructive register reads, with runtime power held.
+ * HW_TE_CNT is 0x38 in Google's pinned cal_9865/regs-decon.h, not the
+ * unrelated exynos910 counter at 0x78.
+ */
+static ssize_t lab_status_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
+{
+	struct decon_context *ctx = dev_get_drvdata(dev);
+	int ret, len;
+
+	if (!ctx)
+		return -EAGAIN;
+	ret = pm_runtime_get_if_in_use(dev);
+	if (ret <= 0)
+		return sysfs_emit(buf, "inactive\n");
+	len = sysfs_emit(buf,
+		"global=%08x trigger=%08x te_count=%08x shadow_req=%08x int_enable=%08x int_pending=%08x path=%08x extra_pending=%08x win0_control=%08x win0_color0=%08x win0_color1=%08x dsc0_control1=%08x dsc0_pps08_11=%08x dsc1_pps08_11=%08x\n",
+		zd_main_read(ctx->idx, ZD_GLOBAL_CON),
+		zd_main_read(ctx->idx, ZD_TRIG_CON),
+		zd_main_read(ctx->idx, ZD_HW_TE_CNT),
+		zd_main_read(ctx->idx, ZD_SHD_REG_UP_REQ),
+		zd_main_read(ctx->idx, ZD_DECON_INT_EN),
+		zd_main_read(ctx->idx, ZD_DECON_INT_PEND),
+		zd_main_read(ctx->idx, ZD_DATA_PATH_CON_0),
+		zd_main_read(ctx->idx, ZD_DECON_INT_PEND_EXTRA),
+		readl(zd_wincon[ctx->idx] + ZD_DECON_CON_WIN(0)),
+		zd_win_read(ctx->idx, ZD_WIN_COLORMAP_0(0)),
+		zd_win_read(ctx->idx, ZD_WIN_COLORMAP_1(0)),
+		readl(zd_sub[ctx->idx] + ZD_DSC_CONTROL1(0)),
+		readl(zd_sub[ctx->idx] + ZD_DSC_PPS00_03(0) + 8),
+		readl(zd_sub[ctx->idx] + ZD_DSC_PPS00_03(1) + 8));
+	pm_runtime_put(dev);
+	return len;
+}
+static DEVICE_ATTR_RO(lab_status);
+static struct attribute *zuma_lab_attrs[] = {
+	&dev_attr_lab_status.attr,
+	NULL,
+};
+static const struct attribute_group zuma_lab_group = {
+	.attrs = zuma_lab_attrs,
+};
+
 static int zuma_decon_init(struct decon_context *ctx,
 			   struct platform_device *pdev)
 {
@@ -826,6 +874,9 @@ static int zuma_decon_init(struct decon_context *ctx,
 		blocks[i].base[id] = base;
 	}
 
+	i = devm_device_add_group(ctx->dev, &zuma_lab_group);
+	if (i)
+		dev_warn(ctx->dev, "lab snapshot unavailable: %d\n", i);
 	return 0;
 }
 

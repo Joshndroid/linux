@@ -37,6 +37,7 @@ struct sec_pmic_acpm_platform_data {
 	const struct regmap_config *regmap_cfg_pmic;
 	const struct regmap_config *regmap_cfg_rtc;
 	const struct regmap_config *regmap_cfg_meter;
+	const struct regmap_config *regmap_cfg_gpio;
 };
 
 static const struct regmap_range s2mpg10_common_registers[] = {
@@ -422,6 +423,248 @@ static const struct regmap_config s2mpg1415_regmap_config_meter = {
 	.cache_type = REGCACHE_FLAT,
 };
 
+/*
+ * S2MPG14/S2MPG15 common block.  Nothing like S2MPG10's -- these chips sit on
+ * an I3C bus, so instead of a CHIPID/INT/INT_MASK trio at 0x00 they expose the
+ * virtual GPIO words the SoC exchanges with them, the I3C dynamic address and
+ * engine state, and the in-band interrupt status (IBI0..IBI3) and per-block
+ * enable (IBIM1/IBIM2).  Borrowing the S2MPG10 config here is what used to
+ * send interrupt mask writes into VGPIO2.
+ *
+ * The VGPIO words are left out of the writable table: they are the SoC's side
+ * of the conversation, nothing in Linux has any business driving them, and
+ * keeping them read-only means a misaimed write is refused rather than quietly
+ * toggling a virtual GPIO.
+ */
+static const struct regmap_range s2mpg1415_common_registers[] = {
+	regmap_reg_range(S2MPG14_COMMON_VGPIO0, S2MPG14_COMMON_IBI3),
+	regmap_reg_range(S2MPG14_COMMON_CHIPID, S2MPG14_COMMON_IBIM2),
+};
+
+static const struct regmap_range s2mpg1415_common_ro_registers[] = {
+	regmap_reg_range(S2MPG14_COMMON_VGPIO0, S2MPG14_COMMON_IBI3),
+	regmap_reg_range(S2MPG14_COMMON_CHIPID, S2MPG14_COMMON_CHIPID),
+	regmap_reg_range(S2MPG14_COMMON_I3C_STA, S2MPG14_COMMON_I3C_STA),
+};
+
+static const struct regmap_range s2mpg1415_common_nonvolatile_registers[] = {
+	regmap_reg_range(S2MPG14_COMMON_CHIPID, S2MPG14_COMMON_CHIPID),
+	regmap_reg_range(S2MPG14_COMMON_I3C_CFG1, S2MPG14_COMMON_I3C_CFG2),
+	regmap_reg_range(S2MPG14_COMMON_IBIM1, S2MPG14_COMMON_IBIM2),
+};
+
+/* IBI0..IBI3 latch which block raised an in-band interrupt and clear on read */
+static const struct regmap_range s2mpg1415_common_precious_registers[] = {
+	regmap_reg_range(S2MPG14_COMMON_IBI0, S2MPG14_COMMON_IBI3),
+};
+
+static const struct regmap_access_table s2mpg1415_common_wr_table = {
+	.yes_ranges = s2mpg1415_common_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg1415_common_registers),
+	.no_ranges = s2mpg1415_common_ro_registers,
+	.n_no_ranges = ARRAY_SIZE(s2mpg1415_common_ro_registers),
+};
+
+static const struct regmap_access_table s2mpg1415_common_rd_table = {
+	.yes_ranges = s2mpg1415_common_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg1415_common_registers),
+};
+
+static const struct regmap_access_table s2mpg1415_common_volatile_table = {
+	.no_ranges = s2mpg1415_common_nonvolatile_registers,
+	.n_no_ranges = ARRAY_SIZE(s2mpg1415_common_nonvolatile_registers),
+};
+
+static const struct regmap_access_table s2mpg1415_common_precious_table = {
+	.yes_ranges = s2mpg1415_common_precious_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg1415_common_precious_registers),
+};
+
+static const struct regmap_config s2mpg1415_regmap_config_common = {
+	.name = "common",
+	.reg_bits = ACPM_ADDR_BITS,
+	.val_bits = 8,
+	.max_register = S2MPG14_COMMON_IBIM2,
+	.wr_table = &s2mpg1415_common_wr_table,
+	.rd_table = &s2mpg1415_common_rd_table,
+	.volatile_table = &s2mpg1415_common_volatile_table,
+	.precious_table = &s2mpg1415_common_precious_table,
+	.num_reg_defaults_raw = S2MPG14_COMMON_IBIM2 + 1,
+	.cache_type = REGCACHE_FLAT,
+};
+
+/*
+ * S2MPG14 PMIC block.  Five interrupt registers rather than S2MPG10's six --
+ * the power-meter interrupts moved to the meter block on this chip -- so the
+ * masks begin at 0x05, and every register after them is shifted by one
+ * against S2MPG10.  With the S2MPG10 config in place the interrupt masks were
+ * written one register high, which left INT1M untouched and put mask bits into
+ * STATUS1 and STATUS2.
+ */
+static const struct regmap_range s2mpg14_pmic_registers[] = {
+	regmap_reg_range(S2MPG14_PMIC_INT1, S2MPG14_PMIC_SW_RESET),
+};
+
+static const struct regmap_range s2mpg14_pmic_ro_registers[] = {
+	regmap_reg_range(S2MPG14_PMIC_INT1, S2MPG14_PMIC_INT5),
+	regmap_reg_range(S2MPG14_PMIC_STATUS1, S2MPG14_PMIC_OFFSRC2),
+};
+
+static const struct regmap_range s2mpg14_pmic_nonvolatile_registers[] = {
+	regmap_reg_range(S2MPG14_PMIC_INT1M, S2MPG14_PMIC_INT5M),
+};
+
+static const struct regmap_range s2mpg14_pmic_precious_registers[] = {
+	regmap_reg_range(S2MPG14_PMIC_INT1, S2MPG14_PMIC_INT5),
+};
+
+static const struct regmap_access_table s2mpg14_pmic_wr_table = {
+	.yes_ranges = s2mpg14_pmic_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg14_pmic_registers),
+	.no_ranges = s2mpg14_pmic_ro_registers,
+	.n_no_ranges = ARRAY_SIZE(s2mpg14_pmic_ro_registers),
+};
+
+static const struct regmap_access_table s2mpg14_pmic_rd_table = {
+	.yes_ranges = s2mpg14_pmic_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg14_pmic_registers),
+};
+
+static const struct regmap_access_table s2mpg14_pmic_volatile_table = {
+	.no_ranges = s2mpg14_pmic_nonvolatile_registers,
+	.n_no_ranges = ARRAY_SIZE(s2mpg14_pmic_nonvolatile_registers),
+};
+
+static const struct regmap_access_table s2mpg14_pmic_precious_table = {
+	.yes_ranges = s2mpg14_pmic_precious_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg14_pmic_precious_registers),
+};
+
+static const struct regmap_config s2mpg14_regmap_config_pmic = {
+	.name = "pmic",
+	.reg_bits = ACPM_ADDR_BITS,
+	.val_bits = 8,
+	.max_register = S2MPG14_PMIC_SW_RESET,
+	.wr_table = &s2mpg14_pmic_wr_table,
+	.rd_table = &s2mpg14_pmic_rd_table,
+	.volatile_table = &s2mpg14_pmic_volatile_table,
+	.precious_table = &s2mpg14_pmic_precious_table,
+	.num_reg_defaults_raw = S2MPG14_PMIC_SW_RESET + 1,
+	.cache_type = REGCACHE_FLAT,
+};
+
+/* S2MPG15 PMIC block: four interrupt registers, masks from 0x04 */
+static const struct regmap_range s2mpg15_pmic_registers[] = {
+	regmap_reg_range(S2MPG15_PMIC_INT1, S2MPG15_PMIC_BB_USONIC),
+};
+
+static const struct regmap_range s2mpg15_pmic_ro_registers[] = {
+	regmap_reg_range(S2MPG15_PMIC_INT1, S2MPG15_PMIC_INT4),
+	regmap_reg_range(S2MPG15_PMIC_OFFSRC1, S2MPG15_PMIC_OFFSRC2),
+};
+
+static const struct regmap_range s2mpg15_pmic_nonvolatile_registers[] = {
+	regmap_reg_range(S2MPG15_PMIC_INT1M, S2MPG15_PMIC_INT4M),
+};
+
+static const struct regmap_range s2mpg15_pmic_precious_registers[] = {
+	regmap_reg_range(S2MPG15_PMIC_INT1, S2MPG15_PMIC_INT4),
+};
+
+static const struct regmap_access_table s2mpg15_pmic_wr_table = {
+	.yes_ranges = s2mpg15_pmic_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg15_pmic_registers),
+	.no_ranges = s2mpg15_pmic_ro_registers,
+	.n_no_ranges = ARRAY_SIZE(s2mpg15_pmic_ro_registers),
+};
+
+static const struct regmap_access_table s2mpg15_pmic_rd_table = {
+	.yes_ranges = s2mpg15_pmic_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg15_pmic_registers),
+};
+
+static const struct regmap_access_table s2mpg15_pmic_volatile_table = {
+	.no_ranges = s2mpg15_pmic_nonvolatile_registers,
+	.n_no_ranges = ARRAY_SIZE(s2mpg15_pmic_nonvolatile_registers),
+};
+
+static const struct regmap_access_table s2mpg15_pmic_precious_table = {
+	.yes_ranges = s2mpg15_pmic_precious_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg15_pmic_precious_registers),
+};
+
+static const struct regmap_config s2mpg15_regmap_config_pmic = {
+	.name = "pmic",
+	.reg_bits = ACPM_ADDR_BITS,
+	.val_bits = 8,
+	.max_register = S2MPG15_PMIC_BB_USONIC,
+	.wr_table = &s2mpg15_pmic_wr_table,
+	.rd_table = &s2mpg15_pmic_rd_table,
+	.volatile_table = &s2mpg15_pmic_volatile_table,
+	.precious_table = &s2mpg15_pmic_precious_table,
+	.num_reg_defaults_raw = S2MPG15_PMIC_BB_USONIC + 1,
+	.cache_type = REGCACHE_FLAT,
+};
+
+/* GPIO register maps adapted from the pinned native tree; retain the file notices above. */
+static const struct regmap_range s2mpg14_gpio_registers[] = {
+	regmap_reg_range(S2MPG14_GPIO_STATUS, S2MPG14_GPIO5_MONSEL),
+};
+
+static const struct regmap_range s2mpg14_gpio_ro_registers[] = {
+	regmap_reg_range(S2MPG14_GPIO_STATUS, S2MPG14_GPIO_STATUS),
+};
+
+static const struct regmap_access_table s2mpg14_gpio_wr_table = {
+	.yes_ranges = s2mpg14_gpio_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg14_gpio_registers),
+	.no_ranges = s2mpg14_gpio_ro_registers,
+	.n_no_ranges = ARRAY_SIZE(s2mpg14_gpio_ro_registers),
+};
+
+static const struct regmap_access_table s2mpg14_gpio_rd_table = {
+	.yes_ranges = s2mpg14_gpio_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg14_gpio_registers),
+};
+
+static const struct regmap_config s2mpg14_regmap_config_gpio = {
+	.name = "gpio",
+	.reg_bits = ACPM_ADDR_BITS,
+	.val_bits = 8,
+	.max_register = S2MPG14_GPIO5_MONSEL,
+	.wr_table = &s2mpg14_gpio_wr_table,
+	.rd_table = &s2mpg14_gpio_rd_table,
+};
+
+static const struct regmap_range s2mpg15_gpio_registers[] = {
+	regmap_reg_range(S2MPG15_GPIO_STATUS1, S2MPG15_GPIO9_MONSEL),
+};
+
+static const struct regmap_range s2mpg15_gpio_ro_registers[] = {
+	regmap_reg_range(S2MPG15_GPIO_STATUS1, S2MPG15_GPIO_STATUS2),
+};
+
+static const struct regmap_access_table s2mpg15_gpio_wr_table = {
+	.yes_ranges = s2mpg15_gpio_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg15_gpio_registers),
+	.no_ranges = s2mpg15_gpio_ro_registers,
+	.n_no_ranges = ARRAY_SIZE(s2mpg15_gpio_ro_registers),
+};
+
+static const struct regmap_access_table s2mpg15_gpio_rd_table = {
+	.yes_ranges = s2mpg15_gpio_registers,
+	.n_yes_ranges = ARRAY_SIZE(s2mpg15_gpio_registers),
+};
+
+static const struct regmap_config s2mpg15_regmap_config_gpio = {
+	.name = "gpio",
+	.reg_bits = ACPM_ADDR_BITS,
+	.val_bits = 8,
+	.max_register = S2MPG15_GPIO9_MONSEL,
+	.wr_table = &s2mpg15_gpio_wr_table,
+	.rd_table = &s2mpg15_gpio_rd_table,
+};
+
 struct sec_pmic_acpm_shared_bus_context {
 	struct acpm_handle *acpm;
 	unsigned int acpm_chan_id;
@@ -434,6 +677,7 @@ enum sec_pmic_acpm_accesstype {
 	SEC_PMIC_ACPM_ACCESSTYPE_RTC = 0x02,
 	SEC_PMIC_ACPM_ACCESSTYPE_METER = 0x0a,
 	SEC_PMIC_ACPM_ACCESSTYPE_WLWP = 0x0b,
+	SEC_PMIC_ACPM_ACCESSTYPE_GPIO = 0x0c,
 	SEC_PMIC_ACPM_ACCESSTYPE_TRIM = 0x0f,
 };
 
@@ -582,6 +826,13 @@ static int sec_pmic_acpm_probe(struct platform_device *pdev)
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
+	if (pdata->regmap_cfg_gpio) {
+		regmap = sec_pmic_acpm_regmap_init(dev, shared_ctx, SEC_PMIC_ACPM_ACCESSTYPE_GPIO,
+						   pdata->regmap_cfg_gpio, true);
+		if (IS_ERR(regmap))
+			return PTR_ERR(regmap);
+	}
+
 	ret = sec_pmic_probe(dev, pdata->device_type, irq, regmap_pmic, NULL);
 	if (ret)
 		return ret;
@@ -620,19 +871,21 @@ static const struct sec_pmic_acpm_platform_data s2mpg14_data = {
 	.device_type = S2MPG14,
 	.acpm_chan_id = 2,
 	.speedy_channel = 0,
-	.regmap_cfg_common = &s2mpg10_regmap_config_common,
-	.regmap_cfg_pmic = &s2mpg10_regmap_config_pmic,
+	.regmap_cfg_common = &s2mpg1415_regmap_config_common,
+	.regmap_cfg_pmic = &s2mpg14_regmap_config_pmic,
 	.regmap_cfg_rtc = &s2mpg10_regmap_config_rtc,
 	.regmap_cfg_meter = &s2mpg1415_regmap_config_meter,
+	.regmap_cfg_gpio = &s2mpg14_regmap_config_gpio,
 };
 
 static const struct sec_pmic_acpm_platform_data s2mpg15_data = {
 	.device_type = S2MPG15,
 	.acpm_chan_id = 2,
 	.speedy_channel = 1,
-	.regmap_cfg_common = &s2mpg11_regmap_config_common,
-	.regmap_cfg_pmic = &s2mpg11_regmap_config_pmic,
+	.regmap_cfg_common = &s2mpg1415_regmap_config_common,
+	.regmap_cfg_pmic = &s2mpg15_regmap_config_pmic,
 	.regmap_cfg_meter = &s2mpg1415_regmap_config_meter,
+	.regmap_cfg_gpio = &s2mpg15_regmap_config_gpio,
 };
 
 static const struct of_device_id sec_pmic_acpm_of_match[] = {

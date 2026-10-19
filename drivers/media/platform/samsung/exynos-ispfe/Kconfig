@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config VIDEO_EXYNOS_ISPFE
+	bool "Google zumapro ISPFE camera receive complex"
+	depends on ARCH_EXYNOS || COMPILE_TEST
+	depends on COMMON_CLK
+	depends on INTERCONNECT
+	depends on OF
+	depends on PM
+	depends on VIDEO_DEV
+	depends on VIDEO_EXYNOS_BECORE
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	select VIDEOBUF2_DMA_CONTIG
+	select VIDEOBUF2_VMALLOC
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  Bring-up driver for BLK_ISPFE on Google's zumapro (Tensor G4): the
+	  CSIS links and their combo D/C-PHYs, the ISPFE front end, and the
+	  PDMA that carries per-frame descriptors.
+
+	  At this stage the driver powers the block, restores the CMU state that
+	  the power domain does not, and offers a media graph of one sensor
+	  subdevice feeding a CSI receiver subdevice feeding one raw Bayer
+	  capture node.  It is of no use outside camera bring-up.
+
+	  This is built-in because module removal cannot be aborted if the shared
+	  PHY isolation fails to restore before the ISPFE power domain goes down.
+
+	  If unsure, say N.
+
+config LUMA_TOKAY_MEDIA_CORE_DIAGNOSTIC
+	bool "Tokay RAM lab: generic media core startup comparison"
+	depends on ARCH_EXYNOS && VIDEO_DEV
+	select V4L2_ISP
+	select VIDEOBUF2_CORE
+	select VIDEOBUF2_DMA_CONTIG
+	select VIDEOBUF2_MEMOPS
+	select VIDEOBUF2_V4L2
+	select VIDEOBUF2_VMALLOC
+	help
+	  Temporary port diagnostic selecting only the generic media helpers.
+	  Does not select or instantiate an ISP, sensor, virtual camera, or PHY.
+	  Hidden helper symbols cannot be selected by .config assignments alone.
+	  Keep disabled outside the controlled RAM boot comparison.

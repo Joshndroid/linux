@@ -808,6 +808,8 @@ static int aoc_bt_probe(struct platform_device *pdev)
 	/* Every close cuts power, and with it the patchram. */
 	hci_set_quirk(hdev, HCI_QUIRK_NON_PERSISTENT_SETUP);
 	hdev->set_bdaddr = btbcm_set_bdaddr;
+	if (of_machine_is_compatible("google,tokay"))
+		hci_set_quirk(hdev, HCI_QUIRK_USE_BDADDR_PROPERTY);
 
 	platform_set_drvdata(pdev, bt);
 

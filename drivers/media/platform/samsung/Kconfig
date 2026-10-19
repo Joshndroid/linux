@@ -8,3 +8,6 @@ source "drivers/media/platform/samsung/s3c-camif/Kconfig"
 source "drivers/media/platform/samsung/s5p-g2d/Kconfig"
 source "drivers/media/platform/samsung/s5p-jpeg/Kconfig"
 source "drivers/media/platform/samsung/s5p-mfc/Kconfig"
+
+source "drivers/media/platform/samsung/exynos-becore/Kconfig"
+source "drivers/media/platform/samsung/exynos-ispfe/Kconfig"

@@ -287,6 +287,15 @@ struct cmd_audio_output_set_param {
 #define AOC_MIC_PDM_MAX				4
 
 /*
+ * Tokay RAM diagnostic: factory mixer_paths.xml lists built-in mic IDs 0, 1, 2.
+ * Keep the verified 0/1 pair by default; a read-only load parameter permits
+ * testing 1/2 without advertising an unverified multichannel PCM format.
+ */
+static unsigned int aoc_capture_mic_start;
+module_param_named(capture_mic_start, aoc_capture_mic_start, uint, 0444);
+MODULE_PARM_DESC(capture_mic_start, "Tokay diagnostic first capture mic ID (0 or 1)");
+
+/*
  * The mic boots muted: both gain stages sit at zero, so a recording is barely
  * above the noise floor.  These are the values the stock record paths use.
  */
@@ -849,6 +858,11 @@ static int aoc_audio_mic_setup(struct aoc_audio *aud, u8 channel,
 	unsigned int i;
 	int ret;
 
+	if (aoc_capture_mic_start &&
+	    (!of_machine_is_compatible("google,tokay") ||
+	     aoc_capture_mic_start > 1))
+		return -EINVAL;
+
 	cmd.hdr.type = AOC_CMD_TYPE_CMD;
 	cmd.hdr.len = cpu_to_le16(sizeof(cmd));
 	cmd.hdr.id = cpu_to_le16(AOC_CMD_AUDIO_INPUT_MIC_PARAMS_ID);
@@ -858,8 +872,9 @@ static int aoc_audio_mic_setup(struct aoc_audio *aud, u8 channel,
 	cmd.format.format = AOC_FRMT_FIXED_POINT;
 	/* One built-in mic per requested channel, on consecutive PDM lanes. */
 	for (i = 0; i < AOC_MIC_PDM_MAX; i++)
-		cmd.interleaving[i] = (i < channels) ? i : 0xff;
-	cmd.pdm_mask = (1u << channels) - 1;
+		cmd.interleaving[i] = (i < channels) ?
+			i + aoc_capture_mic_start : 0xff;
+	cmd.pdm_mask = ((1u << channels) - 1) << aoc_capture_mic_start;
 	cmd.period_ms = 10;
 	cmd.num_periods = 4;
 	cmd.sample_rate = cmd.format.sr;
@@ -892,7 +907,7 @@ static int aoc_audio_mic(struct aoc_audio *aud, bool on)
 	int ret;
 
 	cmd.hdr.type = AOC_CMD_TYPE_CMD;
-	cmd.hdr.len = cpu_to_le16(sizeof(cmd));
+	cmd.hdr.len = cpu_to_le16(on ? sizeof(cmd) : sizeof(cmd.hdr));
 	cmd.hdr.id = cpu_to_le16(on ? AOC_CMD_AUDIO_INPUT_START_ID :
 				      AOC_CMD_AUDIO_INPUT_STOP_ID);
 	cmd.mic_input_source = AOC_MIC_SRC_AP;
@@ -1092,6 +1107,34 @@ static int aoc_pcm_prepare(struct snd_soc_component *comp,
 
 	if (aoc_pcm_is_be(substream))
 		return 0;
+
+	if (!s->playback) {
+		unsigned int remaining = AOC_PCM_BUFFER_BYTES;
+		char discarded[256];
+		int ret;
+
+		/* No old capture work may consume bytes across a format change. */
+		hrtimer_cancel(&s->tick);
+		cancel_work_sync(&s->period_work);
+		/*
+		 * The firmware ring survives PCM close.  Discard the previous
+		 * stream's samples before interpreting bytes in the new format.
+		 * Bound the drain so a producer that fails to stop cannot hang
+		 * prepare.  Tokay's capture ring is 92160 bytes, below this cap.
+		 */
+		while (remaining && aoc_service_can_read(s->svc)) {
+			ret = aoc_service_read(s->svc, discarded,
+					       min_t(unsigned int, remaining,
+						     sizeof(discarded)));
+			if (ret == -ENODATA)
+				break;
+			if (ret <= 0)
+				return ret ? ret : -EIO;
+			remaining -= ret;
+		}
+		if (aoc_service_can_read(s->svc))
+			return -EBUSY;
+	}
 
 	s->base = aoc_service_progress(s->svc, s->playback);
 	s->prev_consumed = s->base;

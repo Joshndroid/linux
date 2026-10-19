@@ -45,6 +45,14 @@ static bool decon_oneshot = true;
 module_param_named(oneshot, decon_oneshot, bool, 0644);
 MODULE_PARM_DESC(oneshot, "command mode: send one frame per commit");
 
+static bool decon_sw_trigger;
+module_param_named(sw_trigger, decon_sw_trigger, bool, 0644);
+MODULE_PARM_DESC(sw_trigger, "lab: use software command-mode frame trigger");
+
+static bool decon_test_colormap;
+module_param_named(test_colormap, decon_test_colormap, bool, 0644);
+MODULE_PARM_DESC(test_colormap, "lab: replace the window input with opaque red");
+
 /* PD : Porter-Duff */
 enum decon_blend_pd_func {
 	PD_FUNC_CLEAR = 0x0,
@@ -1485,7 +1493,7 @@ static void decon_update_plane(struct exynos_drm_crtc *crtc,
 	 * The solid-colour map path proved the DECON blender -> DSC -> OUTFIFO ->
 	 * DSIM -> panel chain works; now drive actual pixels through the DPP.
 	 */
-	decon_set_win_color_map(window, false);
+	decon_set_win_color_map(window, decon_test_colormap);
 
 	dpp_update(window->dpp, state);
 	dpu_dma_update(dma_ctx, window->dpp->type, state);
@@ -1644,16 +1652,12 @@ static void decon_set_mode(struct exynos_drm_crtc *crtc)
 		mode->op_mode = crtc->i80_mode ? DECON_MIPI_COMMAND_MODE :
 						 DECON_VIDEO_MODE;
 
-	/*
-	 * Command mode: drive frames from the panel's hardware TE. The DECON
-	 * latches the shadow config and emits a frame on each TE edge; the SW
-	 * trigger does not reliably latch on this DECON (the shadow-update
-	 * request was never consumed and the DECON sat idle). TE is confirmed
-	 * reaching the DECON (HW_TE_CNT increments), and the TE pad is routed to
-	 * DDI0, so use HW trigger as the vendor does for command mode.
+	/* Vendor normal mode uses hardware TE. The lab override isolates frame
+	 * transport from the missing TE signal; it is not a display fix. Live
+	 * measurements on Tokay find the correct HW_TE_CNT (0x38) static.
 	 */
 	if (mode->op_mode == DECON_MIPI_COMMAND_MODE)
-		mode->te_mode = DECON_HW_TRIG;
+		mode->te_mode = decon_sw_trigger ? DECON_SW_TRIG : DECON_HW_TRIG;
 
 	ctx->config.out_type = out_type;
 }

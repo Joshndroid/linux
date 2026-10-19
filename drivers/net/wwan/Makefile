@@ -15,3 +15,7 @@ obj-$(CONFIG_RPMSG_WWAN_CTRL) += rpmsg_wwan_ctrl.o
 obj-$(CONFIG_IOSM) += iosm/
 obj-$(CONFIG_S5300_MODEM) += s5xxx_modem.o
 obj-$(CONFIG_MTK_T7XX) += t7xx/
+
+obj-$(CONFIG_S5XXX_RFS_SESSION) += s5xxx_rfs_session.o
+obj-$(CONFIG_S5XXX_RFS_SESSION_KUNIT_TEST) += s5xxx_rfs_session_test.o
+obj-$(CONFIG_S5XXX_RFS_SESSION) += s5xxx_rfs_endpoint.o

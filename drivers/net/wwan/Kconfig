@@ -122,6 +122,7 @@ config MTK_T7XX
 	  If unsure, say N.
 
 config S5300_MODEM
+	select S5XXX_RFS_SESSION
 	tristate "Samsung Exynos Modem 5300 PCIe boot driver"
 	depends on PCI_EXYNOS || COMPILE_TEST
 	depends on PCI
@@ -140,3 +141,22 @@ config S5300_MODEM
 endif # WWAN
 
 endmenu
+
+config S5XXX_RFS_SESSION
+	tristate "Exynos RFS single-owner session state"
+	depends on WWAN
+	help
+	  Bounded request queues and reset fencing for native RFS transport.
+	  This component performs no modem hardware access by itself.
+
+config S5XXX_RFS_SESSION_KUNIT_TEST
+	tristate "Exynos RFS session tests" if !KUNIT_ALL_TESTS
+	depends on KUNIT && S5XXX_RFS_SESSION
+	default KUNIT_ALL_TESTS
+
+config S5XXX_MODEM_KUNIT_TEST
+	bool "Exynos modem emulated-register tests"
+	depends on UML && KUNIT=y && S5300_MODEM=y
+	help
+	  Execute the real transport framing and reset paths with emulated MMIO.
+	  Built-in only: the emulated resource registration has kernel lifetime.

@@ -17,7 +17,7 @@
 #include "clk-pll.h"
 
 /* NOTE: Must be equal to the last clock ID increased by one */
-#define CLKS_NR_TOP	(CLK_GOUT_CMU_HSI0_DPOSC + 1)
+#define CLKS_NR_TOP	(CLK_GOUT_CMU_DFTMUX_CIS_CLK3 + 1)
 #define CLKS_NR_APM	(CLK_APM_PLL_DIV16_APM + 1)
 #define CLKS_NR_DPU	(CLK_MOUT_DPU_DSIM_USER + 1)
 #define CLKS_NR_HSI0	(CLK_DOUT_HSI0_USB + 1)
@@ -1137,6 +1137,19 @@ static const struct samsung_gate_clock top_gate_clks[] __initconst = {
 	     21, 0, 0),
 	GATE(CLK_GOUT_CMU_TPU_UART, "gout_cmu_tpu_uart", "mout_cmu_tpu_uart",
 	     CLK_CON_GAT_GATE_CLKCMU_TPU_UART, 21, 0, 0),
+	/* Manual pad requests, adapted from the source-pinned native camera tree. */
+	GATE(CLK_GOUT_CMU_DFTMUX_CIS_CLK0, "gout_cmu_dftmux_cis_clk0",
+	     "dout_cmu_cis_clk0", DMYQCH_CON_DFTMUX_CMU_QCH_CIS_CLK0,
+	     1, CLK_SET_RATE_PARENT,
+	     CLK_GATE_SAMSUNG_MANUAL),
+	GATE(CLK_GOUT_CMU_DFTMUX_CIS_CLK1, "gout_cmu_dftmux_cis_clk1",
+	     "dout_cmu_cis_clk1", DMYQCH_CON_DFTMUX_CMU_QCH_CIS_CLK1,
+	     1, CLK_SET_RATE_PARENT,
+	     CLK_GATE_SAMSUNG_MANUAL),
+	GATE(CLK_GOUT_CMU_DFTMUX_CIS_CLK3, "gout_cmu_dftmux_cis_clk3",
+	     "dout_cmu_cis_clk3", DMYQCH_CON_DFTMUX_CMU_QCH_CIS_CLK3,
+	     1, CLK_SET_RATE_PARENT,
+	     CLK_GATE_SAMSUNG_MANUAL),
 };
 
 static const struct samsung_cmu_info top_cmu_info __initconst = {

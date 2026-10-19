@@ -134,9 +134,10 @@ void __set_fixmap(enum fixed_addresses idx,
 	}
 }
 
-void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
+static void *__init remap_fdt_window(phys_addr_t dt_phys, int *size,
+				     pgprot_t prot, enum fixed_addresses slot)
 {
-	const u64 dt_virt_base = __fix_to_virt(FIX_FDT);
+	const u64 dt_virt_base = __fix_to_virt(slot);
 	phys_addr_t dt_phys_base;
 	int offset;
 	void *dt_virt;
@@ -173,3 +174,15 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 
 	return dt_virt;
 }
+
+void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
+{
+	return remap_fdt_window(dt_phys, size, prot, FIX_FDT);
+}
+
+#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+void *__init fixmap_remap_luma_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
+{
+	return remap_fdt_window(dt_phys, size, prot, FIX_LUMA_FDT);
+}
+#endif

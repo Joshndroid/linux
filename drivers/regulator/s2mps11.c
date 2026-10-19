@@ -1899,6 +1899,8 @@ static const struct regulator_desc s2mpg14_regulators[] = {
 	regulator_desc_s2mpg14_buck(7, "vinb7m", s2mpg14_buck_vranges1),
 	regulator_desc_s2mpg14_ldo(4, "vinl4m", s2mpg14_ldo_vranges4, BIT(7)),
 	regulator_desc_s2mpg14_ldo(5, "vinl5m", s2mpg14_ldo_vranges5, GENMASK(7, 6)),
+	/* Google gs/3045cdcf: L14M CTRL 0x38, group5, enable bit 7. */
+	regulator_desc_s2mpg14_ldo(14, "vinl14m", s2mpg14_ldo_vranges4, BIT(7)),
 	regulator_desc_s2mpg14_ldo(25, "vinl25m", s2mpg14_ldo_vranges5, BIT(7)),
 };
 
@@ -1974,6 +1976,10 @@ static const struct regulator_desc s2mpg15_regulators[] = {
 				   BIT(7)),
 	regulator_desc_s2mpg15_ldo(11, "vinl11s", s2mpg15_ldo_vranges10,
 				   GENMASK(5, 0), S2MPG15_PMIC_L11S_CTRL,
+				   BIT(7)),
+	/* Google gs/3045cdcf: LDO12S group6, CTRL0x3a, selector5:0, enable7. */
+	regulator_desc_s2mpg15_ldo(12, "vinl12s", s2mpg15_ldo_vranges10,
+				   GENMASK(5, 0), S2MPG15_PMIC_L12S_CTRL,
 				   BIT(7)),
 	/* AoC sensor rails; see s2mpg15_reg_enable_only_ops above */
 	regulator_desc_s2mpg15_ldo_en(5),
@@ -2460,6 +2466,22 @@ static int s2mps11_pmic_probe(struct platform_device *pdev)
 			rdesc = &s2mpg1x_regulators[i].desc;
 		else
 			rdesc = &regulators[i];
+
+		/* LDO14M is opt-in: do not change another board's display rail
+		 * merely by adding a descriptor to this shared PMIC driver.
+		 */
+		if (s2mps11->dev_type == S2MPG14 && rdesc->id == S2MPG14_LDO14) {
+			struct device_node *regs, *np;
+			bool enabled;
+
+			regs = of_get_child_by_name(config.dev->of_node, "regulators");
+			np = of_get_child_by_name(regs, "ldo14m");
+			enabled = of_device_is_available(np);
+			of_node_put(np);
+			of_node_put(regs);
+			if (!enabled)
+				continue;
+		}
 
 		regulator = devm_regulator_register(&pdev->dev,
 						    rdesc, &config);

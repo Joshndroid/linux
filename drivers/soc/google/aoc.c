@@ -1483,6 +1483,18 @@ static int aoc_probe(struct platform_device *pdev)
 		put_device(aoc->gsa);
 		return -EPROBE_DEFER;
 	}
+	/* Google gsa_aoc.h defines INACTIVE as zero. Never overwrite the
+	 * carveout of firmware that is already loaded or running, and do not
+	 * treat a failed state query as permission to stage another image.
+	 */
+	ret = gsa_aoc_get_state(aoc->gsa);
+	if (ret) {
+		dev_err(dev, "refusing firmware staging: GSA AOC state %d\n", ret);
+		if (ret > 0)
+			ret = -EBUSY;
+		goto err_put_gsa;
+	}
+	dev_info(dev, "GSA confirms AOC inactive before firmware staging\n");
 
 	/* The AOC DRAM carveout the firmware body is staged into. */
 	np = of_parse_phandle(dev->of_node, "memory-region", 0);
@@ -1549,7 +1561,12 @@ static int aoc_probe(struct platform_device *pdev)
 	debugfs_create_file("services", 0444, aoc->dbgfs, aoc,
 			    &aoc_services_fops);
 
-	if (aoc_load_image(aoc, fw) == 0) {
+	ret = aoc_load_image(aoc, fw);
+	if (ret) {
+		release_firmware(fw);
+		goto err_put_gsa;
+	}
+	{
 		dev_dbg(dev, "post-load pre-start: GSA state %d\n",
 			gsa_aoc_get_state(aoc->gsa));
 		/*

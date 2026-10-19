@@ -293,4 +293,26 @@ enum s2mpg15_regulators {
 
 #define S2MPG15_PMIC_CTRL_ENABLE_EXT BIT(0)
 
+/* GPIO additions: Copyright 2026 Steffen Deusch; source pin recorded in provenance. */
+/*
+ * GPIO registers (type 0x00c).  The S2MPG14's layout widened for ten pins:
+ * one more interrupt register, a second status register for pins 8 and 9, and
+ * ten control registers.
+ */
+enum s2mpg15_gpio_reg {
+	S2MPG15_GPIO_INT1 = 0x00,
+	S2MPG15_GPIO_INT2 = 0x01,
+	S2MPG15_GPIO_INT3 = 0x02,
+	S2MPG15_GPIO_INT1M = 0x03,
+	S2MPG15_GPIO_INT2M = 0x04,
+	S2MPG15_GPIO_INT3M = 0x05,
+	S2MPG15_GPIO_STATUS1 = 0x06,
+	S2MPG15_GPIO_STATUS2 = 0x07,
+	S2MPG15_GPIO0_SET = 0x08,
+	S2MPG15_GPIO0_MONSEL = 0x12,
+	S2MPG15_GPIO9_MONSEL = 0x1b,
+};
+
+#define S2MPG15_GPIO_NR		10
+
 #endif /* __LINUX_MFD_S2MPG15_H */

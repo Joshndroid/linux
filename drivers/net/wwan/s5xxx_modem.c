@@ -58,6 +58,7 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <linux/wwan.h>
+#include "s5xxx_rfs_endpoint.h"
 
 #define S5XXX_PCI_VENDOR_ID		0x144d
 #define S5XXX_PCI_DEVICE_ID		0xa5a5
@@ -384,27 +385,6 @@ struct s5xxx_variant {
 #define S5XXX_CH_RFS			0x29
 #define S5XXX_RFS_MAX			SZ_4K
 
-/*
- * In-kernel RFS server: after attach the CP OPENs + READs its carrier config
- * (path-whitelisted to carrierconfig/) and its NV files over the RFS channel,
- * chunk by chunk with an ack ping-pong.  We answer them from firmware (the
- * carrierconfig tree + the efs NV) rather than forwarding to a userspace daemon.
- * Framing (RE'd from downstream rfsd): u16 cmd, u16 token, u32 payload_len, then
- * the payload.  Every request MUST be answered or the CP stalls its IPC.
- */
-#define S5XXX_RFS_MAXFID		32
-#define S5XXX_RFS_CHUNK			2012	/* downstream rfsd chunk size */
-#define S5XXX_CC_DIR			"carrierconfig"
-#define S5XXX_RFS_C_READ		0x0001	/* AP->CP chunk / CP->AP next-ack */
-#define S5XXX_RFS_C_WRITE		0x0002	/* AP->CP req / CP->AP data */
-#define S5XXX_RFS_C_STATUS		0x0003	/* status + fid + file-size */
-#define S5XXX_RFS_C_OPEN		0x0004	/* open a path */
-#define S5XXX_RFS_C_CLOSE		0x0005
-#define S5XXX_RFS_C_IO			0x0006	/* start a read or write */
-#define S5XXX_RFS_C_OPEN_FID		0x0007	/* open an NV file by id */
-#define S5XXX_RFS_IO_READ		1
-#define S5XXX_RFS_IO_WRITE		2
-
 /* Doorbell values: bit 16 triggers, low bits select the mailbox index. */
 #define S5XXX_DB_TRIGGER		BIT(16)
 #define S5XXX_DB_MSG			(S5XXX_DB_TRIGGER | 0x0)	/* int_ap2cp_msg */
@@ -533,18 +513,6 @@ struct s5xxx_variant {
 #define S5XXX_DL_SEC_VERIFY(tag)	(0xa301 | ((tag) << 4))	/* CRC-verify */
 #define S5XXX_DL_FINISH			0xa400
 
-/* Per-open state for the in-kernel RFS server (indexed by the CP's fid). */
-struct s5xxx_rfs_file {
-	bool			used;
-	const struct firmware	*fw;	/* cached read source, or NULL */
-	size_t			size;	/* file size reported at OPEN */
-	loff_t			roff;	/* read cursor */
-	size_t			rremain;	/* bytes left to serve */
-	loff_t			woff;	/* write cursor */
-	size_t			wremain;	/* bytes left to sink */
-	u16			token;	/* active IO token, echoed in chunks */
-};
-
 struct s5xxx_modem;
 
 /*
@@ -643,7 +611,7 @@ struct s5xxx_modem {
 	unsigned long		fmt_busy_until;	/* inhibit park during an FMT transfer (jiffies) */
 
 	/* RFS file channel (umts_rfs0, ch 0x29) on the NORM_RAW ring. */
-	struct wwan_port	*rfs_port;
+	struct s5xxx_rfs_endpoint *rfs_endpoint;
 	u8			rfs_ch_seq;	/* RFS per-channel sequence */
 
 	/*
@@ -664,13 +632,6 @@ struct s5xxx_modem {
 	u8			gnss_rsp_buf[8];
 	u8			gnss_rsp_len;
 
-	/* In-kernel RFS server: carrierconfig/NV files the CP pulls post-attach. */
-	struct s5xxx_rfs_file	rfs_files[S5XXX_RFS_MAXFID];
-	struct work_struct	rfs_work;
-	struct list_head	rfs_rxq;	/* queued CP requests (rfs_lock) */
-	spinlock_t		rfs_lock;
-	struct workqueue_struct	*rfs_wq;
-	u8			*rfs_txbuf;	/* one READ frame (rfs_work only) */
 
 	/*
 	 * PKTPROC data path: the raw-IP data netdevs (rmnet0..).  DL queue q is
@@ -1281,6 +1242,30 @@ static irqreturn_t s5xxx_cp2ap_wakeup_irq(int irq, void *data)
  * Diagnosis only for now -- distinguishes "CP parked and deaf to the
  * AP2CP_WAKEUP nudge" (active still 1) from "CP died after ONLINE" (active 0).
  */
+/* Caller fences all ring TX before discarding a previous CP incarnation. */
+static void s5xxx_rfs_reset_locked(struct s5xxx_modem *sm)
+{
+	unsigned long flags;
+
+	lockdep_assert_held(&sm->tx_lock);
+	s5xxx_rfs_endpoint_reset(sm->rfs_endpoint);
+	/* The PM worker flushes reservations under this same mailbox lock. */
+	spin_lock_irqsave(&sm->lock, flags);
+	sm->db_reserved = false;
+	writel(0, sm->ipc + S5XXX_IPC_AP2CP_MSG);
+	spin_unlock_irqrestore(&sm->lock, flags);
+}
+
+static void s5xxx_rfs_revoke(struct s5xxx_modem *sm)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&sm->tx_lock, flags);
+	WRITE_ONCE(sm->online, false);
+	s5xxx_rfs_reset_locked(sm);
+	spin_unlock_irqrestore(&sm->tx_lock, flags);
+}
+
 static irqreturn_t s5xxx_cp_active_irq(int irq, void *data)
 {
 	struct s5xxx_modem *sm = data;
@@ -1312,6 +1297,8 @@ static irqreturn_t s5xxx_cp_active_irq(int irq, void *data)
 			readl(sm->ipc + S5XXX_IPC_CP2AP_MSG),
 			sm->irq_count);
 	}
+	if (!up)
+		s5xxx_rfs_revoke(sm);
 	return IRQ_HANDLED;
 }
 
@@ -1698,6 +1685,7 @@ static void s5xxx_set_ap_capabilities(struct s5xxx_modem *sm)
  */
 static void s5xxx_init_ipc_queues(struct s5xxx_modem *sm)
 {
+	unsigned long flags;
 	u32 magic, access;
 	int i;
 
@@ -1708,6 +1696,8 @@ static void s5xxx_init_ipc_queues(struct s5xxx_modem *sm)
 	WRITE_ONCE(sm->tx_suspended, false);
 	s5xxx_pdp_flowctl(sm, false);
 
+	spin_lock_irqsave(&sm->tx_lock, flags);
+	s5xxx_rfs_reset_locked(sm);
 	sm->fmt_frame_seq = 0;
 	for (i = 0; i < S5XXX_SIT_PORTS; i++)
 		sm->sit[i].ch_seq = 0;
@@ -1724,6 +1714,7 @@ static void s5xxx_init_ipc_queues(struct s5xxx_modem *sm)
 
 	magic = readl(sm->ipc + S5XXX_IPC_MAGIC);
 	access = readl(sm->ipc + S5XXX_IPC_ACCESS);
+	spin_unlock_irqrestore(&sm->tx_lock, flags);
 	if (magic != S5XXX_IPC_MAGIC_VALUE || access != 1)
 		dev_err(sm->dev, "IPC init readback failed: magic %#x access %u\n",
 			magic, access);
@@ -1795,31 +1786,28 @@ static const struct s5xxx_txring s5xxx_fmt_txring = {
  * serialised by tx_lock; each caller owns its @ch_seq.  Returns @full_err on a
  * full ring so the caller picks -EAGAIN (drop) or -EBUSY (wait and retry).
  */
-static int s5xxx_ring_tx(struct s5xxx_modem *sm, const struct s5xxx_txring *r,
+static int s5xxx_ring_tx_locked(struct s5xxx_modem *sm, const struct s5xxx_txring *r,
 			 u16 *frame_seq, u8 ch, u8 *ch_seq, u32 max,
 			 const u8 *data, u32 len, int full_err)
 {
 	u32 flen = ALIGN(S5XXX_SIT_HDR + len, 8);
 	void __iomem *buff = sm->ipc + r->buff;
-	unsigned long flags;
 	u8 hdr[S5XXX_SIT_HDR];
 	u32 in, out;
 
 	if (len == 0 || len > max)
 		return -EMSGSIZE;
 
-	spin_lock_irqsave(&sm->tx_lock, flags);
+	lockdep_assert_held(&sm->tx_lock);
 
 	in = readl(sm->ipc + r->head);
 	out = readl(sm->ipc + r->tail);
 	if (in >= r->size || out >= r->size) {
-		spin_unlock_irqrestore(&sm->tx_lock, flags);
 		dev_err_ratelimited(sm->dev, "txq ptr oob (in %#x out %#x)\n",
 				    in, out);
 		return -EIO;
 	}
 	if (s5xxx_circ_space(r->size, in, out) < flen) {
-		spin_unlock_irqrestore(&sm->tx_lock, flags);
 		dev_info_ratelimited(sm->dev,
 			     "txq full: ch %#x len %u in %#x out %#x space %u\n",
 			     ch, len, in, out, s5xxx_circ_space(r->size, in, out));
@@ -1842,10 +1830,23 @@ static int s5xxx_ring_tx(struct s5xxx_modem *sm, const struct s5xxx_txring *r,
 	dma_wmb();
 	writel((in + flen) % r->size, sm->ipc + r->head);
 
-	spin_unlock_irqrestore(&sm->tx_lock, flags);
-
-	s5xxx_send_ipc_irq(sm, S5XXX_INT_VALID | r->int_flag);
 	return 0;
+}
+
+static int s5xxx_ring_tx(struct s5xxx_modem *sm, const struct s5xxx_txring *r,
+			 u16 *frame_seq, u8 ch, u8 *ch_seq, u32 max,
+			 const u8 *data, u32 len, int full_err)
+{
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&sm->tx_lock, flags);
+	ret = s5xxx_ring_tx_locked(sm, r, frame_seq, ch, ch_seq, max,
+				   data, len, full_err);
+	spin_unlock_irqrestore(&sm->tx_lock, flags);
+	if (!ret)
+		s5xxx_send_ipc_irq(sm, S5XXX_INT_VALID | r->int_flag);
+	return ret;
 }
 
 /* AT / control channels on the NORM_RAW ring; also the boot handshake path. */
@@ -2209,324 +2210,48 @@ static const struct wwan_port_ops s5xxx_oem_ops = {
 	.tx_blocking	= s5xxx_oem_tx_blocking,
 };
 
-/* RFS file channel (ch 0x29) on the NORM_RAW ring, its own per-channel seq. */
-static int s5xxx_rfs_tx(struct s5xxx_modem *sm, const u8 *data, u32 len)
+/* Lock order: hardware TX -> session -> mailbox. No sleeping in this path. */
+static int s5xxx_rfs_emit(void *context, struct s5xxx_rfs_session *session,
+			  u64 epoch, const void *frame, size_t length)
 {
-	return s5xxx_ring_tx(sm, &s5xxx_raw_txring, &sm->frame_seq, S5XXX_CH_RFS,
-			     &sm->rfs_ch_seq, S5XXX_RFS_MAX, data, len, -EAGAIN);
-}
-
-static int s5xxx_rfs_port_tx(struct wwan_port *port, struct sk_buff *skb)
-{
-	struct s5xxx_modem *sm = wwan_port_get_drvdata(port);
+	struct s5xxx_modem *sm = context;
+	unsigned long tx_flags, session_flags;
 	int ret;
 
-	if (!sm->online)
-		return -ENODEV;
-	ret = s5xxx_rfs_tx(sm, skb->data, skb->len);
+	spin_lock_irqsave(&sm->tx_lock, tx_flags);
+	ret = s5xxx_rfs_session_tx_begin(session, epoch, &session_flags);
 	if (ret)
-		return ret;
-	consume_skb(skb);
-	return 0;
-}
-
-static const struct wwan_port_ops s5xxx_rfs_ops = {
-	.start	= s5xxx_wwan_start,
-	.stop	= s5xxx_wwan_stop,
-	.tx	= s5xxx_rfs_port_tx,
-};
-
-/* One queued CP request, handed from the hard-IRQ demux to s5xxx_rfs_work. */
-struct s5xxx_rfs_frame {
-	struct list_head	node;
-	u32			len;
-	u8			data[];
-};
-
-/* Send an RFS app frame, retrying while the RAW tx ring is momentarily full. */
-static void s5xxx_rfs_send(struct s5xxx_modem *sm, const u8 *frame, u32 len)
-{
-	int i;
-
-	for (i = 0; i < 200; i++) {
-		if (s5xxx_rfs_tx(sm, frame, len) != -EAGAIN)
-			return;
-		usleep_range(1000, 2000);
+		goto unlock;
+	if (!READ_ONCE(sm->online)) {
+		ret = -ENOTCONN;
+		goto end;
 	}
-	dev_warn_ratelimited(sm->dev, "RFS tx stalled (ring full)\n");
-}
-
-/* OP_STATUS(3): status=success, fid, and (on OPEN) the file size. */
-static void s5xxx_rfs_op_status(struct s5xxx_modem *sm, u16 token, u32 fid,
-				u32 extra)
-{
-	u8 r[20];
-
-	put_unaligned_le16(S5XXX_RFS_C_STATUS, r + 0);
-	put_unaligned_le16(token, r + 2);
-	put_unaligned_le32(12, r + 4);
-	put_unaligned_le32(0, r + 8);		/* status 0 = success */
-	put_unaligned_le32(fid, r + 0xc);
-	put_unaligned_le32(extra, r + 0x10);
-	s5xxx_rfs_send(sm, r, sizeof(r));
-}
-
-static void s5xxx_rfs_close_file(struct s5xxx_rfs_file *e)
-{
-	if (e->fw)
-		release_firmware(e->fw);
-	memset(e, 0, sizeof(*e));
-}
-
-/* Serve the next READ chunk for fid, or OP_STATUS when the read is done. */
-static void s5xxx_rfs_read_step(struct s5xxx_modem *sm, u32 fid)
-{
-	struct s5xxx_rfs_file *e = &sm->rfs_files[fid];
-	u32 clen = min_t(size_t, e->rremain, S5XXX_RFS_CHUNK);
-	u8 *tx = sm->rfs_txbuf;
-
-	if (!clen || !e->fw || e->roff + clen > e->fw->size) {
-		s5xxx_rfs_op_status(sm, e->token, fid, 0);
-		return;
-	}
-	put_unaligned_le16(S5XXX_RFS_C_READ, tx + 0);
-	put_unaligned_le16(e->token, tx + 2);
-	put_unaligned_le32(12 + clen, tx + 4);
-	put_unaligned_le32(fid, tx + 8);
-	put_unaligned_le32(e->roff, tx + 0xc);
-	put_unaligned_le32(clen, tx + 0x10);
-	memcpy(tx + 0x14, e->fw->data + e->roff, clen);
-	s5xxx_rfs_send(sm, tx, 0x14 + clen);
-	e->roff += clen;
-	e->rremain -= clen;
-}
-
-/* Ask the CP for the next write chunk for fid (the data is sunk + discarded). */
-static void s5xxx_rfs_write_req(struct s5xxx_modem *sm, u32 fid)
-{
-	struct s5xxx_rfs_file *e = &sm->rfs_files[fid];
-	u32 clen = min_t(size_t, e->wremain, S5XXX_RFS_CHUNK);
-	u8 r[20];
-
-	put_unaligned_le16(S5XXX_RFS_C_WRITE, r + 0);
-	put_unaligned_le16(e->token, r + 2);
-	put_unaligned_le32(12, r + 4);
-	put_unaligned_le32(fid, r + 8);
-	put_unaligned_le32(e->woff, r + 0xc);
-	put_unaligned_le32(clen, r + 0x10);
-	s5xxx_rfs_send(sm, r, sizeof(r));
-}
-
-/* Map + open a whitelisted OPEN(path) request read-only from firmware. */
-static int s5xxx_rfs_open_path(struct s5xxx_modem *sm, struct s5xxx_rfs_file *e,
-			       const u8 *path, u32 plen)
-{
-	char name[256], fw[288];
-	const char *rel;
-	int ret;
-
-	if (plen >= sizeof(name))
-		return -ENAMETOOLONG;
-	memcpy(name, path, plen);
-	name[plen] = '\0';
-
-	/* Whitelist: carrier config only, no path traversal (like rfsd). */
-	if (strstr(name, "..") ||
-	    (!strstr(name, "carrierconfig") && !strstr(name, "confpack")))
-		return -EPERM;
-	rel = strstr(name, "carrierconfig/");
-	if (!rel)
-		return -EINVAL;
-	rel += strlen("carrierconfig/");
-	scnprintf(fw, sizeof(fw), "google/%s/%s/%s", sm->var->fw_dir,
-		  S5XXX_CC_DIR, rel);
-	ret = request_firmware_direct(&e->fw, fw, sm->dev);
-	dev_dbg(sm->dev, "RFS serve %s: %d\n", fw, ret);
+	ret = s5xxx_ring_tx_locked(sm, &s5xxx_raw_txring, &sm->frame_seq,
+				   S5XXX_CH_RFS, &sm->rfs_ch_seq, S5XXX_RFS_MAX,
+				   frame, length, -EAGAIN);
+	/* Keep the epoch fenced through both publication and the doorbell. */
+	if (!ret)
+		s5xxx_send_ipc_irq(sm, S5XXX_INT_VALID | S5XXX_INT_SEND_RAW);
+end:
+	s5xxx_rfs_session_tx_end(session, session_flags);
+unlock:
+	spin_unlock_irqrestore(&sm->tx_lock, tx_flags);
 	return ret;
 }
 
-/* NV files served read-only from the staged efs partition. */
-static const char *s5xxx_rfs_nv_name(u32 fid)
+static void s5xxx_rfs_receive(struct s5xxx_modem *sm, void __iomem *buff,
+			      u32 offset, u32 length)
 {
-	switch (fid) {
-	case 1:	return "efs/nv_normal.bin";
-	case 2:	return "efs/nv_protected.bin";
-	case 3:	return "efs/nv_user.bin";
-	default: return NULL;
+	struct sk_buff *skb = NULL;
+
+	if (length >= 8 && length <= S5XXX_RFS_MAX) {
+		skb = alloc_skb(length, GFP_ATOMIC);
+		if (skb)
+			s5xxx_circ_read(skb_put(skb, length), buff,
+					S5XXX_RAW_RXQ_SIZE, offset, length);
 	}
-}
-
-static void s5xxx_rfs_open_nv(struct s5xxx_modem *sm, struct s5xxx_rfs_file *e,
-			      u32 fid)
-{
-	const char *name = s5xxx_rfs_nv_name(fid);
-	char path[S5XXX_FW_PATH_MAX];
-
-	e->used = true;
-	if (!name)
-		return;
-	s5xxx_fw_path(sm, path, sizeof(path), name);
-	if (!request_firmware_direct(&e->fw, path, sm->dev))
-		e->size = e->fw->size;
-}
-
-/* Handle one CP RFS request (process context, single-threaded via rfs_work). */
-static void s5xxx_rfs_handle(struct s5xxx_modem *sm, const u8 *f, u32 n)
-{
-	u16 cmd = get_unaligned_le16(f), token = get_unaligned_le16(f + 2);
-	u32 fid, off, iolen, iotype, clen, plen;
-	struct s5xxx_rfs_file *e;
-
-	switch (cmd) {
-	case S5XXX_RFS_C_OPEN:			/* 4: open a path */
-		if (n < 0x10)
-			return;
-		fid = get_unaligned_le32(f + 8);
-		plen = get_unaligned_le32(f + 0xc);
-		if (fid >= S5XXX_RFS_MAXFID)
-			return;
-		if (0x10 + plen > n)
-			plen = n - 0x10;
-		e = &sm->rfs_files[fid];
-		s5xxx_rfs_close_file(e);
-		e->used = true;
-		if (!s5xxx_rfs_open_path(sm, e, f + 0x10, plen) && e->fw)
-			e->size = e->fw->size;
-		s5xxx_rfs_op_status(sm, token, fid, e->size);
-		return;
-	case S5XXX_RFS_C_OPEN_FID:		/* 7: open an NV file by id */
-		fid = get_unaligned_le32(f + 8);
-		if (fid >= S5XXX_RFS_MAXFID)
-			return;
-		e = &sm->rfs_files[fid];
-		s5xxx_rfs_close_file(e);
-		s5xxx_rfs_open_nv(sm, e, fid);
-		s5xxx_rfs_op_status(sm, token, fid, e->size);
-		return;
-	case S5XXX_RFS_C_IO:			/* 6: start a read or write */
-		if (n < 0x18)
-			return;
-		fid = get_unaligned_le32(f + 8);
-		off = get_unaligned_le32(f + 0xc);
-		iolen = get_unaligned_le32(f + 0x10);
-		iotype = get_unaligned_le32(f + 0x14);
-		if (fid >= S5XXX_RFS_MAXFID)
-			return;
-		e = &sm->rfs_files[fid];
-		/* NV files may be IO_REQUEST'd without a preceding OPEN_FID. */
-		if (!e->used && s5xxx_rfs_nv_name(fid))
-			s5xxx_rfs_open_nv(sm, e, fid);
-		if (!e->used) {			/* never leave a request unanswered */
-			s5xxx_rfs_op_status(sm, token, fid, 0);
-			return;
-		}
-		e->token = token;
-		if (iotype == S5XXX_RFS_IO_READ) {
-			e->roff = off;
-			e->rremain = iolen;
-			s5xxx_rfs_read_step(sm, fid);
-		} else if (iotype == S5XXX_RFS_IO_WRITE) {
-			e->woff = off;
-			e->wremain = iolen;
-			s5xxx_rfs_write_req(sm, fid);
-		} else {
-			s5xxx_rfs_op_status(sm, token, fid, 0);
-		}
-		return;
-	case S5XXX_RFS_C_READ:			/* 1: CP ack -> next chunk */
-		if (n < 0x10)
-			return;
-		fid = get_unaligned_le32(f + 0xc);
-		if (fid >= S5XXX_RFS_MAXFID || !sm->rfs_files[fid].used)
-			return;
-		e = &sm->rfs_files[fid];
-		if (e->rremain)
-			s5xxx_rfs_read_step(sm, fid);
-		else
-			s5xxx_rfs_op_status(sm, e->token, fid, 0);
-		return;
-	case S5XXX_RFS_C_WRITE:			/* 2: CP data -> discard */
-		if (n < 0x14)
-			return;
-		fid = get_unaligned_le32(f + 0xc);
-		if (fid >= S5XXX_RFS_MAXFID || !sm->rfs_files[fid].used)
-			return;
-		clen = get_unaligned_le32(f + 0x10);
-		e = &sm->rfs_files[fid];
-		e->woff += clen;
-		e->wremain = e->wremain > clen ? e->wremain - clen : 0;
-		if (e->wremain)
-			s5xxx_rfs_write_req(sm, fid);
-		else
-			s5xxx_rfs_op_status(sm, e->token, fid, 0);
-		return;
-	case S5XXX_RFS_C_CLOSE:			/* 5: close + ack */
-		fid = get_unaligned_le32(f + 8);
-		if (fid >= S5XXX_RFS_MAXFID)
-			return;
-		s5xxx_rfs_close_file(&sm->rfs_files[fid]);
-		s5xxx_rfs_op_status(sm, token, fid, 0);
-		return;
-	case S5XXX_RFS_C_STATUS:		/* 3: CP ack -- consume */
-		return;
-	default:
-		dev_dbg(sm->dev, "RFS unknown cmd %#x\n", cmd);
-		return;
-	}
-}
-
-static void s5xxx_rfs_work(struct work_struct *work)
-{
-	struct s5xxx_modem *sm = container_of(work, struct s5xxx_modem, rfs_work);
-	struct s5xxx_rfs_frame *fr;
-	unsigned long flags;
-
-	for (;;) {
-		spin_lock_irqsave(&sm->rfs_lock, flags);
-		fr = list_first_entry_or_null(&sm->rfs_rxq,
-					      struct s5xxx_rfs_frame, node);
-		if (fr)
-			list_del(&fr->node);
-		spin_unlock_irqrestore(&sm->rfs_lock, flags);
-		if (!fr)
-			break;
-		s5xxx_rfs_handle(sm, fr->data, fr->len);
-		kfree(fr);
-	}
-}
-
-/* Copy a CP RFS request off the ring (hard IRQ) and queue it for rfs_work. */
-static void s5xxx_rfs_enqueue(struct s5xxx_modem *sm, void __iomem *buff,
-			      u32 off, u32 plen)
-{
-	struct s5xxx_rfs_frame *fr;
-	unsigned long flags;
-
-	if (plen < 8)
-		return;
-	fr = kmalloc(sizeof(*fr) + plen, GFP_ATOMIC);
-	if (!fr)
-		return;
-	fr->len = plen;
-	s5xxx_circ_read(fr->data, buff, S5XXX_RAW_RXQ_SIZE, off, plen);
-	spin_lock_irqsave(&sm->rfs_lock, flags);
-	list_add_tail(&fr->node, &sm->rfs_rxq);
-	spin_unlock_irqrestore(&sm->rfs_lock, flags);
-	queue_work(sm->rfs_wq, &sm->rfs_work);
-}
-
-/* Drop any queued RFS requests and release cached files (teardown). */
-static void s5xxx_rfs_cleanup(struct s5xxx_modem *sm)
-{
-	struct s5xxx_rfs_frame *fr, *tmp;
-	int i;
-
-	list_for_each_entry_safe(fr, tmp, &sm->rfs_rxq, node) {
-		list_del(&fr->node);
-		kfree(fr);
-	}
-	for (i = 0; i < S5XXX_RFS_MAXFID; i++)
-		s5xxx_rfs_close_file(&sm->rfs_files[i]);
+	/* NULL is an explicit lost/malformed record, never a silent success. */
+	s5xxx_rfs_endpoint_rx(sm->rfs_endpoint, skb);
 }
 
 /*
@@ -2560,6 +2285,8 @@ static void s5xxx_drain_raw_rxq(struct s5xxx_modem *sm, u32 intval)
 	in = readl(sm->ipc + S5XXX_RAW_RXQ_HEAD);
 	out = readl(sm->ipc + S5XXX_RAW_RXQ_TAIL);
 	if (in >= S5XXX_RAW_RXQ_SIZE || out >= S5XXX_RAW_RXQ_SIZE) {
+		/* The lost records may include RFS: require a fresh CP session. */
+		s5xxx_rfs_endpoint_rx(sm->rfs_endpoint, NULL);
 		dev_err_ratelimited(sm->dev, "raw rxq ptr oob (in %#x out %#x)\n",
 				    in, out);
 		return;
@@ -2577,6 +2304,7 @@ static void s5xxx_drain_raw_rxq(struct s5xxx_modem *sm, u32 intval)
 			break;
 		s5xxx_circ_read(hdr, buff, S5XXX_RAW_RXQ_SIZE, out, S5XXX_SIT_HDR);
 		if (get_unaligned_le16(hdr) != S5XXX_SIT_SYNC) {
+			s5xxx_rfs_endpoint_rx(sm->rfs_endpoint, NULL);
 			dev_err_ratelimited(sm->dev, "raw rx bad sync %#x; flushing\n",
 					    get_unaligned_le16(hdr));
 			out = in;
@@ -2584,7 +2312,12 @@ static void s5xxx_drain_raw_rxq(struct s5xxx_modem *sm, u32 intval)
 		}
 		flen = get_unaligned_le16(hdr + 6);	/* header + payload */
 		total = ALIGN(flen, 8);
-		if (flen < S5XXX_SIT_HDR || total > usage)
+		if (flen < S5XXX_SIT_HDR) {
+			s5xxx_rfs_endpoint_rx(sm->rfs_endpoint, NULL);
+			out = in;
+			break;
+		}
+		if (total > usage)
 			break;			/* partial frame; wait for more */
 		ch = hdr[8];
 		plen = flen - S5XXX_SIT_HDR;
@@ -2592,18 +2325,10 @@ static void s5xxx_drain_raw_rxq(struct s5xxx_modem *sm, u32 intval)
 
 		if (ch == S5XXX_CH_RFS) {
 			had_raw = true;
-			if (plen <= S5XXX_RFS_MAX) {
-				/* Serve the request in-kernel, not via the port. */
-				s5xxx_rfs_enqueue(sm, buff,
-						  (out + S5XXX_SIT_HDR) %
-							  S5XXX_RAW_RXQ_SIZE,
-						  plen);
-				port = NULL;
-				max = 0;
-			} else {
-				port = sm->rfs_port;
-				max = S5XXX_RFS_MAX;
-			}
+			s5xxx_rfs_receive(sm, buff,
+				(out + S5XXX_SIT_HDR) % S5XXX_RAW_RXQ_SIZE, plen);
+			port = NULL;
+			max = 0;
 		} else if (ch == S5XXX_CH_AT) {
 			port = sm->at_port;
 			max = SZ_2K;
@@ -3294,23 +3019,6 @@ static void s5xxx_online(struct s5xxx_modem *sm)
 	}
 
 	/*
-	 * The RFS file port (umts_rfs0, ch 0x29 on the NORM_RAW ring): once ONLINE
-	 * the modem pulls its carrier config and persists NV over it, and rejects
-	 * SETUP_DATA_CALL until an AP-side RFS server answers.  Expose it so a
-	 * userspace server can serve those file requests.
-	 */
-	sm->rfs_port = wwan_create_port(sm->dev, WWAN_PORT_RFS, &s5xxx_rfs_ops,
-					NULL, sm);
-	if (IS_ERR(sm->rfs_port)) {
-		dev_err(sm->dev, "failed to create RFS port: %ld\n",
-			PTR_ERR(sm->rfs_port));
-		sm->rfs_port = NULL;
-	} else {
-		dev_info(sm->dev, "RFS file port up (umts_rfs0, ch %#x)\n",
-			 S5XXX_CH_RFS);
-	}
-
-	/*
 	 * The oem/GEMS channels on the FMT ring: post-ONLINE the CP streams
 	 * UE-capability-config file requests on 0x82 and GEMS GIPC requests on
 	 * 0x84, and asserts if they go unanswered.  A userspace daemon answers
@@ -3418,6 +3126,7 @@ static irqreturn_t s5xxx_irq_handler(int irq, void *data)
 	cmd = val & S5XXX_CMD_MASK;
 	switch (cmd) {
 	case S5XXX_CMD_INIT_START:
+		s5xxx_rfs_revoke(sm);
 		dev_info(sm->dev, "CP INIT_START\n");
 		if (sm->pktproc) {
 			s5xxx_pktproc_publish_dl(sm);
@@ -3454,6 +3163,7 @@ static irqreturn_t s5xxx_irq_handler(int irq, void *data)
 		break;
 	case S5XXX_CMD_CRASH_RESET:
 	case S5XXX_CMD_CRASH_EXIT:
+		s5xxx_rfs_revoke(sm);
 		dev_err(sm->dev, "CP crash notification %#x (err_report %#x)\n",
 			cmd, readl(sm->msi + S5XXX_MSI_ERR_REPORT));
 		break;
@@ -4774,9 +4484,6 @@ static int s5xxx_probe(struct platform_device *pdev)
 	init_completion(&sm->gnss_rsp);
 	INIT_WORK(&sm->boot_work, s5xxx_boot_work);
 	INIT_WORK(&sm->pm_work, s5xxx_pm_work);
-	INIT_WORK(&sm->rfs_work, s5xxx_rfs_work);
-	INIT_LIST_HEAD(&sm->rfs_rxq);
-	spin_lock_init(&sm->rfs_lock);
 	init_waitqueue_head(&sm->fmt_tx_wq);
 	for (i = 0; i < S5XXX_OEM_PORTS; i++) {
 		static const u8 oem_chs[S5XXX_OEM_PORTS] = {
@@ -5014,6 +4721,12 @@ static int s5xxx_probe(struct platform_device *pdev)
 	writel(0, sm->ipc + S5XXX_IPC_AP2CP_MSG);
 	writel(0, sm->ipc + S5XXX_IPC_CP2AP_MSG);
 	sm->online = false;
+	sm->rfs_endpoint = s5xxx_rfs_endpoint_create(dev, s5xxx_rfs_emit, sm);
+	if (IS_ERR(sm->rfs_endpoint)) {
+		ret = PTR_ERR(sm->rfs_endpoint);
+		sm->rfs_endpoint = NULL;
+		goto err_vectors;
+	}
 
 	ret = request_irq(pci_irq_vector(sm->pdev, 0), s5xxx_irq_handler, 0,
 			  "s5xxx-ipc", sm);
@@ -5055,28 +4768,17 @@ static int s5xxx_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto err_irq;
 	}
-	/* Ordered wq for the in-kernel RFS server; stateful ack ping-pong. */
-	sm->rfs_wq = alloc_ordered_workqueue("s5xxx-rfs", 0);
-	if (!sm->rfs_wq) {
-		ret = -ENOMEM;
-		goto err_wq;
-	}
-	sm->rfs_txbuf = devm_kmalloc(dev, 0x14 + S5XXX_RFS_CHUNK, GFP_KERNEL);
-	if (!sm->rfs_txbuf) {
-		ret = -ENOMEM;
-		goto err_rfs;
-	}
 	sm->cp2ap_irq = gpiod_to_irq(sm->cp2ap_wakeup);
 	if (sm->cp2ap_irq < 0) {
 		ret = dev_err_probe(dev, sm->cp2ap_irq, "CP2AP_WAKEUP to irq\n");
-		goto err_rfs;
+		goto err_wq;
 	}
 	ret = request_irq(sm->cp2ap_irq, s5xxx_cp2ap_wakeup_irq,
 			  IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |
 			  IRQF_NO_AUTOEN, "s5xxx-cp2ap-wakeup", sm);
 	if (ret) {
 		dev_err(dev, "CP2AP_WAKEUP request_irq: %d\n", ret);
-		goto err_rfs;
+		goto err_wq;
 	}
 
 	/*
@@ -5119,8 +4821,6 @@ static int s5xxx_probe(struct platform_device *pdev)
 
 err_cp2ap_irq:
 	free_irq(sm->cp2ap_irq, sm);
-err_rfs:
-	destroy_workqueue(sm->rfs_wq);
 err_wq:
 	destroy_workqueue(sm->pm_wq);
 err_irq:
@@ -5129,6 +4829,10 @@ err_irq:
 err_irq0:
 	free_irq(pci_irq_vector(sm->pdev, 0), sm);
 err_vectors:
+	if (sm->rfs_endpoint) {
+		s5xxx_rfs_endpoint_detach(sm->rfs_endpoint);
+		s5xxx_rfs_endpoint_put(sm->rfs_endpoint);
+	}
 	pci_free_irq_vectors(sm->pdev);
 err_disable:
 	pci_disable_device(sm->pdev);
@@ -5147,6 +4851,7 @@ static void s5xxx_remove(struct platform_device *pdev)
 	int i;
 
 	debugfs_remove_recursive(sm->dbgfs);
+	s5xxx_rfs_endpoint_detach(sm->rfs_endpoint);
 
 	/*
 	 * Quiesce runtime PM first: free_irq() stops new wakeup IRQs and waits for
@@ -5164,13 +4869,11 @@ static void s5xxx_remove(struct platform_device *pdev)
 	if (sm->nvec > 1)
 		free_irq(pci_irq_vector(sm->pdev, 1), sm);
 	free_irq(pci_irq_vector(sm->pdev, 0), sm);
-	/* Main IRQ gone -> no more DL drains or RFS enqueues. */
+	/* IRQs and workers are quiesced; open files retain their own reference. */
+	s5xxx_rfs_endpoint_put(sm->rfs_endpoint);
 	for (i = 0; i < S5XXX_PDP_CH_COUNT; i++)
 		if (sm->ndev[i])
 			unregister_netdev(sm->ndev[i]); /* needs_free_netdev frees it */
-	cancel_work_sync(&sm->rfs_work);
-	destroy_workqueue(sm->rfs_wq);
-	s5xxx_rfs_cleanup(sm);
 	if (sm->gnss_dump_port)
 		wwan_remove_port(sm->gnss_dump_port);
 	if (sm->gnss_port)
@@ -5178,8 +4881,6 @@ static void s5xxx_remove(struct platform_device *pdev)
 	for (i = 0; i < S5XXX_OEM_PORTS; i++)
 		if (sm->oem[i].port)
 			wwan_remove_port(sm->oem[i].port);
-	if (sm->rfs_port)
-		wwan_remove_port(sm->rfs_port);
 	for (i = 0; i < S5XXX_SIT_PORTS; i++)
 		if (sm->sit[i].port)
 			wwan_remove_port(sm->sit[i].port);
@@ -5263,6 +4964,8 @@ static void s5xxx_shutdown(struct platform_device *pdev)
 	if (!sm)
 		return;
 
+	s5xxx_rfs_endpoint_detach(sm->rfs_endpoint);
+
 	/*
 	 * Stop rmnet TX from ringing the doorbell on a link about to die.  Under
 	 * the transmit lock, so a transmit already inside ul_xmit finishes before
@@ -5284,7 +4987,6 @@ static void s5xxx_shutdown(struct platform_device *pdev)
 	if (sm->nvec > 1)
 		free_irq(pci_irq_vector(sm->pdev, 1), sm);
 	free_irq(pci_irq_vector(sm->pdev, 0), sm);
-	cancel_work_sync(&sm->rfs_work);
 	dev_info(sm->dev, "quiesced for shutdown\n");
 }
 
@@ -5319,3 +5021,7 @@ S5XXX_MODULE_FIRMWARE("s5400");
 
 MODULE_DESCRIPTION("Samsung Exynos s5300/s5400 modem PCIe boot driver");
 MODULE_LICENSE("GPL");
+
+#if IS_ENABLED(CONFIG_S5XXX_MODEM_KUNIT_TEST)
+#include "s5xxx_modem_test.c"
+#endif

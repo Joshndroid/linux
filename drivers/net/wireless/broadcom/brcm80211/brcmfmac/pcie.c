@@ -2972,6 +2972,9 @@ brcmf_pcie_parse_otp(struct brcmf_pciedev_info *devinfo, u8 *otp, size_t size)
 
 		switch (type) {
 		case BRCMF_OTP_SYS_VENDOR:
+			/* The parser below expects Apple's vendor-string layout. */
+			if (devinfo->ci->chip == BRCM_CC_4390_CHIP_ID)
+				break;
 			brcmf_dbg(PCIE, "OTP @ 0x%x (%d): SYS_VENDOR\n",
 				  p, length);
 			ret = brcmf_pcie_parse_otp_sys_vendor(devinfo,
@@ -2981,6 +2984,17 @@ brcmf_pcie_parse_otp(struct brcmf_pciedev_info *devinfo, u8 *otp, size_t size)
 		case BRCMF_OTP_BRCM_CIS:
 			brcmf_dbg(PCIE, "OTP @ 0x%x (%d): BRCM_CIS\n",
 				  p, length);
+			/* BCM4390 vendor tuple: tag, module revision, vendor.
+			 * Report only the non-unique module selector, never the
+			 * neighbouring device address or other per-unit OTP data.
+			 */
+			if (devinfo->ci->chip == BRCM_CC_4390_CHIP_ID &&
+			    length == 3 && otp[p + 2] == 0x81) {
+				dev_info(&devinfo->pdev->dev,
+					 "BCM4390 OTP module revision=%02x vendor=%02x\n",
+					 otp[p + 3], otp[p + 4]);
+				ret = 0;
+			}
 			break;
 		default:
 			brcmf_dbg(PCIE, "OTP @ 0x%x (%d): Unknown type 0x%x\n",
@@ -3029,6 +3043,15 @@ static int brcmf_pcie_read_otp(struct brcmf_pciedev_info *devinfo)
 		coreid = BCMA_CORE_GCI;
 		base = 0x115c;
 		words = 0x150;
+		break;
+	case BRCM_CC_4390_CHIP_ID:
+		/* Broadcom dhd_custom_cis.c, cis_tuple_addr_ranges: the
+		 * read-only CIS shadow occupies 0x1801115c..0x180111b3.
+		 * No OTP programming or persistent storage access is involved.
+		 */
+		coreid = BCMA_CORE_GCI;
+		base = 0x115c;
+		words = 0x2c;
 		break;
 	default:
 		/* OTP not supported on this chip */

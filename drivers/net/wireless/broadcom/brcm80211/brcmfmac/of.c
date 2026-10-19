@@ -79,6 +79,20 @@ int brcmf_of_probe(struct device *dev, enum brcmf_bus_type bus_type,
 	u32 irqf;
 	u32 val;
 
+	/* Tokay's PCI endpoint has no OF node. Its provisioned bootloader
+	 * address is handed over on the board WLAN node, never taken from
+	 * the placeholder address in the factory calibration file.
+	 */
+	if (!np && bus_type == BRCMF_BUSTYPE_PCIE &&
+	    of_machine_is_compatible("google,tokay")) {
+		struct device_node *wlan = of_find_node_by_path("/wlan");
+
+		err = wlan ? of_get_mac_address(wlan, settings->mac) : -ENODEV;
+		of_node_put(wlan);
+		if (err)
+			return err;
+	}
+
 	/* Apple ARM64 platforms have their own idea of board type, passed in
 	 * via the device tree. They also have an antenna SKU parameter
 	 */

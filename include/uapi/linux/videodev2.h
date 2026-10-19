@@ -889,6 +889,11 @@ struct v4l2_pix_format {
 #define V4L2_META_FMT_MALI_C55_PARAMS	v4l2_fourcc('C', '5', '5', 'P') /* ARM Mali-C55 Parameters */
 #define V4L2_META_FMT_MALI_C55_STATS	v4l2_fourcc('C', '5', '5', 'S') /* ARM Mali-C55 3A Statistics */
 
+/* Vendor specific - Google zumapro camera ISP */
+#define V4L2_META_FMT_BECORE_PARAMS	v4l2_fourcc('B', 'E', 'C', 'P') /* zumapro BE-core Parameters */
+#define V4L2_META_FMT_ISPFE_STATS	v4l2_fourcc('I', 'F', 'E', 'S') /* zumapro ISPFE Statistics */
+#define V4L2_META_FMT_ISPFE_PARAMS	v4l2_fourcc('I', 'F', 'E', 'P') /* zumapro ISPFE Parameters */
+
 /* Vendor specific - used for Dreamchip RPP-X1 ISP */
 #define V4L2_META_FMT_RPPX1_PARAMS	v4l2_fourcc('D', 'R', '1', 'P') /* Dreamchip RPP-X1 Parameters */
 #define V4L2_META_FMT_RPPX1_STATS	v4l2_fourcc('D', 'R', '1', 'S') /* Dreamchip RPP-X1 Statistics */

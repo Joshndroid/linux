@@ -16,6 +16,15 @@
 	model = "Pixel 9";
 	compatible = "google,tokay", "google,zumapro-tokay", "google,zumapro";
 
+	/* Factory CP41.260814.003.B1 DTBO 59: display VDDD enable. */
+	disp_vddd: regulator-display-vddd {
+		compatible = "regulator-fixed";
+		regulator-name = "disp_vddd";
+		gpio = <&gpp21 4 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+	};
+
 	memory_4: memory@a00000000 {
 		device_type = "memory";
 		reg = <0x0a 0x00 0x80000000>;
@@ -179,7 +188,11 @@
 	panel0: panel@0 {
 		compatible = "google,gs-tk4c";
 		reg = <0>;
-		/* DDIC reset for cold power-on (unused on boot handover) */
+		vddi-supply = <&s_bucka_reg>;
+		vci-supply = <&m_ldo14_reg>;
+		vddd-supply = <&disp_vddd>;
+		vddd-select-gpios = <&gpp21 5 GPIO_ACTIVE_HIGH>;
+		/* DDIC reset, matching factory TK4C wiring. */
 		reset-gpios = <&gpp0 0 GPIO_ACTIVE_HIGH>;
 
 		port {
@@ -194,6 +207,19 @@
 			reg = <1>;
 			dsim0_out: endpoint {
 				remote-endpoint = <&panel0_in>;
+			};
+		};
+	};
+};
+
+&acpm_ipc {
+	pmic-1 {
+		/* PMIC events now use the common VGPIO2AP interrupt domain. */
+		regulators {
+			m_ldo14_reg: ldo14m {
+				regulator-name = "L14M_DISP_VCI";
+				regulator-min-microvolt = <3100000>;
+				regulator-max-microvolt = <3100000>;
 			};
 		};
 	};
@@ -227,8 +253,22 @@
 	/delete-property/ regulator-always-on;
 };
 
+/*
+ * CP41.260814.003.B1 factory DTBO 59 keeps BUCKA, BUCK7M and BUCK12S
+ * always on. BUCKA also supplies the TK4C panel's VDDI; it is not an
+ * amplifier-only rail. Preserve that board policy until all consumers of
+ * these shared/unmodelled domains are represented. No voltage is changed.
+ */
+&m_buck7_reg {
+	regulator-always-on;
+};
+
+&s_buck12_reg {
+	regulator-always-on;
+};
+
 &s_bucka_reg {
-	/delete-property/ regulator-always-on;
+	regulator-always-on;
 };
 
 &s_ldo9_reg {
@@ -241,4 +281,175 @@
 
 &s_ldo11_reg {
 	/delete-property/ regulator-always-on;
+};
+
+/* Match CP41 factory DTB ramoops geometry so stock can retain native logs. */
+&{/reserved-memory/ramoops@fd3ff000} {
+	record-size = <0>;
+	console-size = <0x200000>;
+	pmsg-size = <0x200000>;
+};
+
+/* Native PMIC GPIO controls its own direction and bias over ACPM; the
+ * inherited empty pinctrl placeholders have no provider or mux mapping. */
+&s2mpg14_gpio {
+	/delete-property/ gpio-ranges;
+};
+
+&s2mpg15_gpio {
+	/delete-property/ gpio-ranges;
+};
+
+/* Camera power-controller bring-up only. Sources: exact CP41.260814.003.B1
+ * factory DTBO59: fragment@camera_supply and fragment@13. No sensor,
+ * autofocus, flash or ISP device is enabled by these declarations. */
+/ {
+	tokay_pp1350_cam: regulator-pp1350-cam {
+		status = "okay";
+		compatible = "regulator-fixed";
+		regulator-name = "PP1350_CAM";
+		regulator-min-microvolt = <1350000>;
+		regulator-max-microvolt = <1350000>;
+		regulator-enable-ramp-delay = <2000>;
+		gpio = <&s2mpg15_gpio 2 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+};
+
+&hsi2c_4 {
+	status = "okay";
+	clock-frequency = <390000>;
+
+	tokay_cam_bb: regulator@77 {
+		status = "okay";
+		compatible = "richtek,rt6160";
+		reg = <0x77>;
+		regulator-name = "PP3200_CAM_BB";
+		regulator-min-microvolt = <3200000>;
+		regulator-max-microvolt = <3200000>;
+		regulator-enable-ramp-delay = <2000>;
+		regulator-initial-mode = <1>;
+		regulator-allowed-modes = <1>;
+		enable-gpios = <&s2mpg15_gpio 1 GPIO_ACTIVE_HIGH>;
+	};
+
+	tokay_cam_pmic: pmic@75 {
+		status = "okay";
+		compatible = "dlg,slg51002";
+		reg = <0x75>;
+		dlg,cs-gpios = <&s2mpg15_gpio 0 GPIO_ACTIVE_HIGH>;
+		vin1_2-supply = <&tokay_cam_bb>;
+		vin3-supply = <&tokay_cam_bb>;
+		vin4-supply = <&tokay_cam_bb>;
+		vin5-supply = <&tokay_cam_bb>;
+		vin6-supply = <&tokay_pp1350_cam>;
+		vin7-supply = <&tokay_pp1350_cam>;
+
+		regulators {
+			tokay_cam_ldo1: ldo1 {
+				regulator-name = "TOKAY_CAM_LDO1";
+				regulator-min-microvolt = <2900000>;
+				regulator-max-microvolt = <2900000>;
+			};
+			tokay_cam_ldo2: ldo2 {
+				regulator-name = "TOKAY_CAM_LDO2";
+				regulator-min-microvolt = <2850000>;
+				regulator-max-microvolt = <2850000>;
+			};
+			tokay_cam_ldo3: ldo3 {
+				regulator-name = "TOKAY_CAM_LDO3";
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+			};
+			tokay_cam_ldo4: ldo4 {
+				regulator-name = "TOKAY_CAM_LDO4";
+				regulator-min-microvolt = <2950000>;
+				regulator-max-microvolt = <2950000>;
+			};
+			tokay_cam_ldo5: ldo5 {
+				regulator-name = "TOKAY_CAM_LDO5";
+				regulator-min-microvolt = <2900000>;
+				regulator-max-microvolt = <2900000>;
+			};
+			tokay_cam_ldo6: ldo6 {
+				regulator-name = "TOKAY_CAM_LDO6";
+				regulator-min-microvolt = <1150000>;
+				regulator-max-microvolt = <1150000>;
+			};
+			tokay_cam_ldo7: ldo7 {
+				regulator-name = "TOKAY_CAM_LDO7";
+				regulator-min-microvolt = <1100000>;
+				regulator-max-microvolt = <1100000>;
+			};
+		};
+	};
+};
+
+/* Exact Tokay CP41 DTBO59 L12S_CAMIO: 1.85 V, not nominal 1.8 V.
+ * No always-on/boot-on or sensor consumer: registering this provider must
+ * leave its enable bit off. Source selector46 was read back before import.
+ */
+&{/firmware/power-management/pmic-2/regulators} {
+	tokay_camio: ldo12s {
+		regulator-name = "L12S_CAMIO";
+		regulator-min-microvolt = <1850000>;
+		regulator-max-microvolt = <1850000>;
+	};
+};
+
+/* RAM-only bounded ultrawide ID consumer. Pin definitions are from Tokay's
+ * exact stock base + DTBO59 drive override; all power/ID work waits for a
+ * manually loaded external diagnostic module. No camera capture graph.
+ */
+&pinctrl_peric0 {
+	tokay_uw_mclk_on: tokay-uw-mclk-on {
+		samsung,pins = "gpp3-0";
+		samsung,pin-function = <2>;
+		samsung,pin-pud = <0>;
+		samsung,pin-drv = <2>;
+	};
+	tokay_uw_mclk_off: tokay-uw-mclk-off {
+		samsung,pins = "gpp3-0";
+		samsung,pin-function = <1>;
+		samsung,pin-pud = <1>;
+		samsung,pin-drv = <2>;
+		samsung,pin-val = <0>;
+	};
+};
+
+&usi2 {
+	status = "okay";
+	samsung,mode = <USI_MODE_I2C>;
+};
+
+&hsi2c_2 {
+	status = "okay";
+	clock-frequency = <390000>;
+
+	uw-id-check@1a {
+		compatible = "luma,tokay-uw-id-check";
+		reg = <0x1a>;
+		reset-gpios = <&gpp4 2 GPIO_ACTIVE_LOW>;
+		bb-supply = <&tokay_cam_bb>;
+		pp1350-supply = <&tokay_pp1350_cam>;
+		ldo6-supply = <&tokay_cam_ldo6>;
+		ldo2-supply = <&tokay_cam_ldo2>;
+		io-supply = <&tokay_camio>;
+		ldo4-supply = <&tokay_cam_ldo4>;
+		clocks = <&cmu_top CLK_GOUT_CMU_DFTMUX_CIS_CLK0>;
+		clock-names = "xclk";
+		/* No default: do not mux the sensor clock at ordinary boot. */
+		pinctrl-names = "off", "on";
+		pinctrl-0 = <&tokay_uw_mclk_off>;
+		pinctrl-1 = <&tokay_uw_mclk_on>;
+	};
+};
+
+/* Exact factory DTBO59 fragment64 has an empty SPI20 pinctrl-0.
+ * SPI2's gpp4 pins belong to the ultrawide I2C/reset path, not SPI20.
+ * Native manual chip select is inside the SPI20 controller and stays enabled.
+ */
+&spi_20 {
+	/delete-property/ pinctrl-0;
+	/delete-property/ pinctrl-names;
 };

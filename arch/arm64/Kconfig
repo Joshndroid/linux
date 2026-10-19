@@ -2519,6 +2519,15 @@ config CMDLINE_FORCE
 
 endchoice
 
+config LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+	bool "Project Luma Tokay embedded diagnostic"
+	depends on ARM64
+	help
+	  Link the exact generated Zumapro Tokay DTB into a diagnostic-only
+	  kernel and use it instead of the prior-stage FDT at primary entry.
+	  This is an explicit Project Luma bring-up option, not a general arm64
+	  boot protocol and not suitable for a multi-device release kernel.
+
 config EFI_STUB
 	bool
 
