@@ -203,6 +203,18 @@ static void *__init map_fdt(phys_addr_t fdt)
 	phys_addr_t efdt = fdt + MAX_FDT_SIZE;
 	phys_addr_t ptep = (phys_addr_t)ptes; /* We're idmapped when called */
 
+#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+	/*
+	 * The lab FDT lives inside the kernel's existing identity map.
+	 * map_range() does not split an existing block descriptor when
+	 * asked to add a partial mapping: walking that block as a table
+	 * would overwrite kernel data. Reuse the mapping only when the
+	 * entire possible FDT range is already covered by the kernel.
+	 */
+	if (fdt >= (u64)_stext && efdt >= fdt && efdt <= (u64)_end)
+		return (void *)fdt;
+#endif
+
 	/*
 	 * Map up to MAX_FDT_SIZE bytes, but avoid overlap with
 	 * the kernel image.

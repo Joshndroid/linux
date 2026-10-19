@@ -85,6 +85,11 @@
 SYM_CODE_START(primary_entry)
 	bl	record_mmu_state
 	bl	preserve_boot_args
+#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+	/* Retain the authentic incoming FDT in boot_args[0] for the lab audit. */
+	adrp	x21, __luma_tokay_dtb_start
+	add	x21, x21, :lo12:__luma_tokay_dtb_start
+#endif
 
 	adrp	x1, early_init_stack
 	mov	sp, x1

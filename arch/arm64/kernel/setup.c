@@ -32,6 +32,10 @@
 #include <linux/sched/task.h>
 #include <linux/scs.h>
 #include <linux/mm.h>
+#include <linux/io.h>
+#include <linux/libfdt.h>
+#include <linux/kobject.h>
+#include <linux/sysfs.h>
 
 #include <asm/acpi.h>
 #include <asm/fixmap.h>
@@ -167,11 +171,66 @@ static void __init smp_build_mpidr_hash(void)
 		pr_warn("Large number of MPIDR hash buckets detected\n");
 }
 
+#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+/* The incoming blob can contain per-unit identifiers. Expose it only to root
+ * for a local handover audit; do not merge Android bindings into the native DT.
+ */
+#include "luma_tokay_fdt.h"
+static const void *luma_bootloader_fdt_virtual __initdata;
+static phys_addr_t luma_bootloader_fdt_phys;
+static int luma_bootloader_fdt_size;
+
+static int __init luma_bootloader_fdt_sysfs_init(void)
+{
+	static __ro_after_init BIN_ATTR_SIMPLE_ADMIN_RO(luma_bootloader_fdt);
+	void *blob;
+	int ret;
+
+	if (!luma_bootloader_fdt_size)
+		return 0;
+	blob = memremap(luma_bootloader_fdt_phys, luma_bootloader_fdt_size,
+			MEMREMAP_WB);
+	if (!blob)
+		return -ENOMEM;
+	ret = luma_tokay_import_wlan_address(blob);
+	if (ret)
+		pr_warn("Luma lab: provisioned WLAN address unavailable (%d)\n", ret);
+	ret = luma_tokay_import_bluetooth_address(blob);
+	if (ret)
+		pr_warn("Luma lab: provisioned Bluetooth address unavailable (%d)\n", ret);
+	bin_attr_luma_bootloader_fdt.private = blob;
+	bin_attr_luma_bootloader_fdt.size = luma_bootloader_fdt_size;
+	ret = sysfs_create_bin_file(firmware_kobj, &bin_attr_luma_bootloader_fdt);
+	if (ret)
+		memunmap(blob);
+	return ret;
+}
+late_initcall(luma_bootloader_fdt_sysfs_init);
+#endif
+
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	int size = 0;
-	void *dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
+	void *dt_virt;
 	const char *name;
+
+#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+	if (boot_args[0] && boot_args[0] != dt_phys) {
+		int original_size = 0;
+		/* Never replace a live physical mapping in the native FIX_FDT slot. */
+		void *original = fixmap_remap_luma_fdt(boot_args[0], &original_size,
+						    PAGE_KERNEL_RO);
+		if (original && original_size >= sizeof(struct fdt_header) && original_size <= SZ_2M) {
+			luma_bootloader_fdt_virtual = original;
+			memblock_reserve(boot_args[0], original_size);
+			luma_bootloader_fdt_phys = boot_args[0];
+			luma_bootloader_fdt_size = original_size;
+			pr_info("Luma lab: reserved original bootloader FDT (%d bytes)\n",
+				original_size);
+		}
+	}
+#endif
+	dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
 
 	if (dt_virt)
 		memblock_reserve(dt_phys, size);
@@ -290,6 +349,10 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	early_ioremap_init();
 
 	setup_machine_fdt(__fdt_pointer);
+#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+	if (luma_bootloader_fdt_virtual)
+		luma_tokay_reserve_firmware(luma_bootloader_fdt_virtual);
+#endif
 
 	/*
 	 * Initialise the static keys early as they may be enabled by the
@@ -338,8 +401,12 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	/* Parse the ACPI tables for possible boot-time configuration */
 	acpi_boot_table_init();
 
-	if (acpi_disabled)
-		unflatten_device_tree();
+	if (acpi_disabled) {
+		if (IS_ENABLED(CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC))
+			unflatten_and_copy_device_tree();
+		else
+			unflatten_device_tree();
+	}
 
 	bootmem_init();
 

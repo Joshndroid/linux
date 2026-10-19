@@ -32,6 +32,33 @@ static struct reserved_mem *reserved_mem __refdata = reserved_mem_array;
 static int total_reserved_mem_cnt = MAX_RESERVED_REGIONS;
 static int reserved_mem_count;
 
+#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+/* The embedded FDT is in init memory. The copied OF tree does not relocate
+ * these descriptor names. Run after normal allocation is available, before
+ * device initcalls consume the table and before init memory is freed.
+ */
+static int __init luma_preserve_reserved_mem_names(void)
+{
+	int i, copied = 0;
+
+	for (i = 0; i < reserved_mem_count; i++) {
+		const char *name = reserved_mem[i].name;
+		char *copy;
+
+		if (!name)
+			continue;
+		copy = kstrdup(name, GFP_KERNEL);
+		if (!copy)
+			panic("Cannot preserve embedded FDT reservation name");
+		reserved_mem[i].name = copy;
+		copied++;
+	}
+	pr_info("Luma lab: preserved %d reserved-memory names\n", copied);
+	return 0;
+}
+early_initcall(luma_preserve_reserved_mem_names);
+#endif
+
 static int __init early_init_dt_alloc_reserved_memory_arch(phys_addr_t size,
 	phys_addr_t align, phys_addr_t start, phys_addr_t end, bool nomap,
 	phys_addr_t *res_base)
