@@ -892,7 +892,7 @@ static int aoc_audio_mic(struct aoc_audio *aud, bool on)
 	int ret;
 
 	cmd.hdr.type = AOC_CMD_TYPE_CMD;
-	cmd.hdr.len = cpu_to_le16(sizeof(cmd));
+	cmd.hdr.len = cpu_to_le16(on ? sizeof(cmd) : sizeof(cmd.hdr));
 	cmd.hdr.id = cpu_to_le16(on ? AOC_CMD_AUDIO_INPUT_START_ID :
 				      AOC_CMD_AUDIO_INPUT_STOP_ID);
 	cmd.mic_input_source = AOC_MIC_SRC_AP;
@@ -1092,6 +1092,34 @@ static int aoc_pcm_prepare(struct snd_soc_component *comp,
 
 	if (aoc_pcm_is_be(substream))
 		return 0;
+
+	if (!s->playback) {
+		unsigned int remaining = AOC_PCM_BUFFER_BYTES;
+		char discarded[256];
+		int ret;
+
+		/* No old capture work may consume bytes across a format change. */
+		hrtimer_cancel(&s->tick);
+		cancel_work_sync(&s->period_work);
+		/*
+		 * The firmware ring survives PCM close.  Discard the previous
+		 * stream's samples before interpreting bytes in the new format.
+		 * Bound the drain so a producer that fails to stop cannot hang
+		 * prepare.
+		 */
+		while (remaining && aoc_service_can_read(s->svc)) {
+			ret = aoc_service_read(s->svc, discarded,
+					       min_t(unsigned int, remaining,
+						     sizeof(discarded)));
+			if (ret == -ENODATA)
+				break;
+			if (ret <= 0)
+				return ret ? ret : -EIO;
+			remaining -= ret;
+		}
+		if (aoc_service_can_read(s->svc))
+			return -EBUSY;
+	}
 
 	s->base = aoc_service_progress(s->svc, s->playback);
 	s->prev_consumed = s->base;
