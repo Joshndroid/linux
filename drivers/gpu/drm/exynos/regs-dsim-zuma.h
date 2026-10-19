@@ -101,8 +101,10 @@
 #define DSIM_PKTHDR_ID(x)			((x) << 0)
 
 #define DSIM_PAYLOAD			0x005c
+#define DSIM_RXFIFO			0x0060
 
 #define DSIM_FIFOCTRL			0x0068
+#define DSIM_FIFOCTRL_EMPTY_RX			(1 << 12)
 #define DSIM_FIFOCTRL_EMPTY_PH_SFR		(1 << 10)
 #define DSIM_FIFOCTRL_EMPTY_PL_SFR		(1 << 8)
 

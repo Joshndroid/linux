@@ -23,6 +23,7 @@
 #include <linux/math64.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
@@ -52,6 +53,7 @@ MODULE_PARM_DESC(te_cmd_allow,
 		 "gate command transfers on the panel TE window (jams the FIFO)");
 
 struct zuma_dsim {
+	struct mutex transfer_lock;
 	struct device *dev;
 	struct drm_encoder encoder;
 	struct drm_bridge bridge;
@@ -565,7 +567,7 @@ static int zuma_dsim_dphy_enable_lanes(struct zuma_dsim *dsim)
 	return ret;
 }
 
-static int dsim_comp_align = 8;
+static int dsim_comp_align = 4;
 module_param_named(comp_align, dsim_comp_align, int, 0644);
 MODULE_PARM_DESC(comp_align,
 		 "pixel alignment of the per-slice compressed width (0 = none)");
@@ -584,10 +586,10 @@ static void zuma_dsim_set_config(struct zuma_dsim *dsim)
 	u32 slice_px = dsc ? DIV_ROUND_UP(slice_w *
 					  dsc->bits_per_component, 8) : 0;
 	u32 comp_w = dsc ? DIV_ROUND_UP(slice_px, 6) * 2 : 0;
-	/*
-	 * Not the DECON's OUTFIFO width: the DSIM carries the compressed bytes
-	 * as RGB24 pixels and needs the per-slice count rounded up to 8, which
-	 * is what the bootloader programs (216/slice where the DECON has 214).
+	/* Match pinned vendor cal_common/exynos_panel.h get_comp_dsc_width:
+	 * ALIGN(DIV_ROUND_UP(slice_width, 3), 4) for this 8-bpc/8-bpp DSC
+	 * link. Eight-pixel rounding requests 368 transport pixels for Tokay,
+	 * while DECON provides 360, causing an observed DSIM underrun.
 	 */
 	u32 width = dsc ? roundup(comp_w, dsim_comp_align ?: 1) * slice_cnt :
 			  dsim->hactive;
@@ -898,6 +900,37 @@ static ssize_t zuma_dsim_host_transfer(struct mipi_dsi_host *host,
 	if (ret < 0)
 		return ret;
 
+	mutex_lock(&dsim->transfer_lock);
+	/* Same per-message semantics as the mainline Samsung DSIM host. The
+	 * prior callback silently ignored MIPI_DSI_MSG_USE_LPM.
+	 */
+	dsim_rmw(dsim, DSIM_ESCMODE,
+		 (msg->flags & MIPI_DSI_MSG_USE_LPM) ?
+		 DSIM_ESCMODE_CMD_LPDT : 0, DSIM_ESCMODE_CMD_LPDT);
+
+	/* RX framing follows Google's cal_9865 DSIM and dsim_req_read_command.
+	 * Diagnostic short reads only: never claim success without an RX packet.
+	 */
+	if (msg->rx_len) {
+		if (!msg->rx_buf || msg->rx_len > 2) {
+			ret = -EOPNOTSUPP;
+			goto out;
+		}
+		/* Discard a prior EoTp/ACK, as Google's RX FIFO cleanup does. */
+		for (i = 0; i < 64; i++) {
+			if (readl(dsim->regs + DSIM_FIFOCTRL) & DSIM_FIFOCTRL_EMPTY_RX)
+				break;
+			readl(dsim->regs + DSIM_RXFIFO);
+		}
+		if (i == 64) {
+			ret = -EIO;
+			goto out;
+		}
+		writel(BIT(18), dsim->regs + DSIM_INTSRC);
+		writel(DSIM_PKTHDR_ID(0x37) |
+		       DSIM_PKTHDR_DATA0(msg->rx_len), dsim->regs + DSIM_PKTHDR);
+	}
+
 	/* long-packet payload first, packed little-endian 4 bytes per word */
 	pl = packet.payload;
 	for (i = 0; i < packet.payload_length; i += 4) {
@@ -922,7 +955,8 @@ static ssize_t zuma_dsim_host_transfer(struct mipi_dsi_host *host,
 	}
 
 	/* header kicks the transfer */
-	writel(DSIM_PKTHDR_ID(packet.header[0]) |
+	writel(DSIM_PKTHDR_BTA_TYPE(!!msg->rx_len) |
+	       DSIM_PKTHDR_ID(packet.header[0]) |
 		       DSIM_PKTHDR_DATA0(packet.header[1]) |
 		       DSIM_PKTHDR_DATA1(packet.header[2]),
 	       dsim->regs + DSIM_PKTHDR);
@@ -955,7 +989,31 @@ static ssize_t zuma_dsim_host_transfer(struct mipi_dsi_host *host,
 	}
 
 	ret = msg->tx_len;
+	if (msg->rx_len) {
+		u8 *rx = msg->rx_buf;
+		ret = readl_poll_timeout(dsim->regs + DSIM_INTSRC, val,
+					val & BIT(18), 10, 100000);
+		if (ret) {
+			dev_warn(dsim->dev, "DCS read timeout cmd=%#x intsrc=%#x\n",
+				 ((const u8 *)msg->tx_buf)[0], val);
+			goto out;
+		}
+		val = readl(dsim->regs + DSIM_RXFIFO);
+		if ((val & 0xff) == 0x21 && msg->rx_len == 1) {
+			rx[0] = val >> 8;
+			ret = 1;
+		} else if ((val & 0xff) == 0x22 && msg->rx_len == 2) {
+			rx[0] = val >> 8;
+			rx[1] = val >> 16;
+			ret = 2;
+		} else {
+			dev_warn(dsim->dev, "Unexpected DCS RX packet %#x\n", val);
+			ret = -EPROTO;
+		}
+	}
+
 out:
+	mutex_unlock(&dsim->transfer_lock);
 	pm_runtime_put_sync(dsim->dev);
 
 	return ret;
@@ -1012,6 +1070,7 @@ static int zuma_dsim_probe(struct platform_device *pdev)
 		return PTR_ERR(dsim);
 
 	dsim->dev = dev;
+	mutex_init(&dsim->transfer_lock);
 	INIT_DELAYED_WORK(&dsim->hotplug_work, zuma_dsim_hotplug_work);
 
 	dsim->regs = devm_platform_ioremap_resource_byname(pdev, "dsi");
