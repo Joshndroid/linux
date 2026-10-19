@@ -243,6 +243,11 @@
 #define CLK_DOUT_CMU_HSI0_DPOSC		225
 #define CLK_GOUT_CMU_HSI0_DPOSC		226
 
+/* Sensor-pad Q-Channel requests; append without renumbering existing clocks. */
+#define CLK_GOUT_CMU_DFTMUX_CIS_CLK0	227
+#define CLK_GOUT_CMU_DFTMUX_CIS_CLK1	228
+#define CLK_GOUT_CMU_DFTMUX_CIS_CLK3	229
+
 /* CMU_APM */
 #define CLK_MOUT_APM_FUNC				1
 #define CLK_MOUT_APM_FUNCSRC				2
