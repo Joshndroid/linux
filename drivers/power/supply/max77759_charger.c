@@ -676,6 +676,24 @@ static int psy_changed(struct notifier_block *nb, unsigned long evt, void *data)
 	return NOTIFY_OK;
 }
 
+/*
+ * The notifier only sees changes after it is registered. If the TCPM source
+ * supply already came online (charger probed after attach, e.g. as a module
+ * or with async probe losing the race), nothing would ever turn charging back
+ * on until the next replug. Pick it up once at probe.
+ */
+static int find_tcpm_psy(struct power_supply *psy, void *data)
+{
+	struct max77759_charger *chg = data;
+
+	if (!strstarts(psy->desc->name, "tcpm-source"))
+		return 0;
+
+	chg->tcpm_psy = psy;
+	schedule_delayed_work(&chg->psy_work, 0);
+	return 1;
+}
+
 static void max_tcpci_unregister_psy_notifier(void *nb)
 {
 	power_supply_unreg_notifier(nb);
@@ -746,6 +764,8 @@ static int max77759_charger_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "Failed to add devm action to unregister psy notifier\n");
+
+	power_supply_for_each_psy(chg, find_tcpm_psy);
 
 	return max77759_init_irqhandler(chg);
 }
