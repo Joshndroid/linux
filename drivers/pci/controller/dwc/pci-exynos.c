@@ -304,7 +304,16 @@ static irqreturn_t exynos_pcie_irq_handler(int irq, void *arg)
 			 * and would be lost. Toggle the per-vector mask to
 			 * force the receiver output low then high again,
 			 * regenerating the edge for any still-pending MSI.
+			 *
+			 * Hold pp->lock: bcmdhd masks its MSI in its ISR and
+			 * unmasks it from its DPC on another CPU, and the DWC
+			 * mask/unmask callbacks update irq_mask[] under this
+			 * lock. Unlocked, this could write back a stale mask
+			 * over a concurrent unmask and leave the vector masked
+			 * in hardware for good (Wi-Fi hung, MSI count frozen;
+			 * more likely under CPU0 IRQ load, e.g. AoC capture).
 			 */
+			guard(raw_spinlock)(&pp->lock);
 			num_ctrls = pp->num_vectors / MAX_MSI_IRQS_PER_CTRL;
 			for (ctrl = 0; ctrl < num_ctrls; ctrl++) {
 				u32 off = ctrl * MSI_REG_CTRL_BLOCK_SIZE;
