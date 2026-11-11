@@ -93,6 +93,7 @@ struct max17042_chip {
 	int    vmax;	/* in millivolts */
 	int    temp_min;	/* in tenths of degree Celsius */
 	int    temp_max;	/* in tenths of degree Celsius */
+	int    fallback_status;	/* last unsupplied status, 0 = none */
 };
 
 static enum power_supply_property max17042_battery_props[] = {
@@ -149,6 +150,30 @@ static int max17042_get_status(struct max17042_chip *chip, int *status)
 	u32 data;
 
 	ret = power_supply_am_i_supplied(chip->battery);
+	if (ret < 0 && chip->enable_current_sense) {
+		/*
+		 * No charger is registered as our supplier, but the gauge
+		 * measures battery current. Report Charging or Discharging
+		 * from AvgCurrent with hysteresis: the status changes only
+		 * when the current passes +/-50 mA and is
+		 * otherwise held. UPower reads every Charging/Full <->
+		 * Discharging flip as a charger plug or unplug, and GNOME
+		 * lights the screen for each one, so the status must not follow
+		 * small drifts around zero.
+		 */
+		int band = chip->r_sns / 625 * 20;	/* 50 mA in AvgCurrent LSBs */
+
+		ret = regmap_read(chip->regmap, MAX17042_AvgCurrent, &data);
+		if (ret < 0)
+			return ret;
+		current_now = sign_extend32(data, 15);
+		if (current_now > band)
+			chip->fallback_status = POWER_SUPPLY_STATUS_CHARGING;
+		else if (current_now < -band || !chip->fallback_status)
+			chip->fallback_status = POWER_SUPPLY_STATUS_DISCHARGING;
+		*status = chip->fallback_status;
+		return 0;
+	}
 	if (ret < 0) {
 		*status = POWER_SUPPLY_STATUS_UNKNOWN;
 		return 0;
@@ -297,6 +322,9 @@ static int max17042_get_property(struct power_supply *psy,
 		if (ret < 0)
 			return ret;
 
+		/* The MAX77759 M5 gauge counts in 1% steps of one cycle. */
+		if (chip->chip_type == MAXIM_DEVICE_TYPE_MAX77759)
+			data = DIV_ROUND_CLOSEST(data, 100);
 		val->intval = data;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
@@ -1461,7 +1489,12 @@ static const struct regmap_config max77759_fg_regmap_cfg = {
 	.max_register = 0xff,
 	.wr_table = &max77759_fg_write_table,
 	.rd_table = &max77759_fg_rd_table,
-	.val_format_endian = REGMAP_ENDIAN_BIG,
+	/*
+	 * The MAX77759 gauge sends 16-bit words LSB first like
+	 * every other MAX17xxx/M5 gauge. Big-endian decoding reads DevName as
+	 * 0x0062 instead of 0x6200 and gives SOC 193%, VCell 3.06V.
+	 */
+	.val_format_endian = REGMAP_ENDIAN_LITTLE,
 	.cache_type = REGCACHE_NONE,
 };
 
