@@ -1791,6 +1791,8 @@ static struct platform_driver aoc_audio_driver = {
 	.driver = {
 		.name = "aoc-audio",
 		.of_match_table = aoc_audio_of_match,
+		/* suspend open streams and power DAPM down across system sleep */
+		.pm = &snd_soc_pm_ops,
 	},
 };
 module_platform_driver(aoc_audio_driver);
