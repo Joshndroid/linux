@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Cirrus Logic CS40L26 haptic driver, from Google's downstream
+# google-modules/amplifiers (android-gs-shusky-6.1-android16, aba0cca).
+# Luma: built without the ASoC codec and the SPI transport.
+#
+
+config INPUT_CS40L26
+	tristate "Cirrus Logic CS40L26 haptic amplifier support"
+	depends on I2C
+	select CL_DSP
+	select REGMAP_I2C
+	select MFD_CORE
+	help
+	  Say Y here to enable support for the CS40L26 boosted haptic
+	  amplifier on I2C (Google Pixel 8 and 9 series). Effects are played
+	  through the input force-feedback interface.
+
+config CL_DSP
+	tristate
