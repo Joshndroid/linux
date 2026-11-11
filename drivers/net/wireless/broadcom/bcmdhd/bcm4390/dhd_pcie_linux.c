@@ -838,17 +838,31 @@ static int dhdpcie_pm_suspend(struct device *dev)
 		return ret;
 	}
 
+	dhdpcie_suspend_cancel_scan(bus);
+
 	DHD_GENERAL_LOCK(bus->dhd, flags);
 	if (!DHD_BUS_BUSY_CHECK_IDLE(bus->dhd)) {
-		DHD_ERROR(("%s: Bus not IDLE!! dhd_bus_busy_state = 0x%x\n",
-			__FUNCTION__, bus->dhd->dhd_bus_busy_state));
+		/*
+		 * Usually transient (the DPC still handling an event, e.g. the
+		 * scan abort above): wait for it like dhdpcie_pci_suspend()
+		 * does instead of refusing the suspend outright.
+		 */
+		DHD_BUS_BUSY_SET_SUSPEND_IN_PROGRESS(bus->dhd);
 		DHD_GENERAL_UNLOCK(bus->dhd, flags);
-		return -EBUSY;
+		timeleft = dhd_os_busbusy_wait_bitmask(bus->dhd,
+				&bus->dhd->dhd_bus_busy_state, 0xFFFFFFFF,
+				DHD_BUS_BUSY_SUSPEND_IN_PROGRESS);
+		if ((timeleft == 0) || (timeleft == 1)) {
+			DHD_ERROR(("%s: Bus not IDLE!! dhd_bus_busy_state = 0x%x\n",
+				__FUNCTION__, bus->dhd->dhd_bus_busy_state));
+			ret = -EBUSY;
+		}
+	} else {
+		DHD_BUS_BUSY_SET_SUSPEND_IN_PROGRESS(bus->dhd);
+		DHD_GENERAL_UNLOCK(bus->dhd, flags);
 	}
-	DHD_BUS_BUSY_SET_SUSPEND_IN_PROGRESS(bus->dhd);
-	DHD_GENERAL_UNLOCK(bus->dhd, flags);
 
-	if (bus->dhd->up)
+	if (!ret && bus->dhd->up)
 		ret = dhdpcie_set_suspend_resume(bus, TRUE);
 
 	DHD_GENERAL_LOCK(bus->dhd, flags);
@@ -1087,9 +1101,21 @@ static int dhdpcie_set_suspend_resume(dhd_bus_t *bus, bool state)
 	ASSERT(bus && !bus->dhd->dongle_reset);
 
 #ifdef DHD_PCIE_RUNTIMEPM
-	/* if wakelock is held during suspend, return failed */
-	if (state == TRUE && dhd_os_check_wakelock_all(bus->dhd)) {
-		return -EBUSY;
+	/*
+	 * If a wakelock is held during suspend, return failed. Most are held
+	 * for milliseconds (an ioctl, an event in flight) and userspace is
+	 * frozen by now, so give them up to a second to drain: a plain Linux
+	 * suspend has no Android autosleep to retry a refusal.
+	 */
+	if (state == TRUE) {
+		int wait_ms = 0;
+
+		while (dhd_os_check_wakelock_all(bus->dhd)) {
+			if (wait_ms >= 1000)
+				return -EBUSY;
+			OSL_SLEEP(10);
+			wait_ms += 10;
+		}
 	}
 	mutex_lock(&bus->pm_lock);
 #endif /* DHD_PCIE_RUNTIMEPM */
