@@ -14,3 +14,24 @@ config BCMDHD_BCM4390
 	  mainline, driving the BCM4390 Wi-Fi on komodo (Pixel 9 Pro XL),
 	  replacing brcmfmac. Produces bcmdhd4390.ko. Uses the mainline
 	  pci-exynos host controller for the PCIe link. Say M.
+
+	  The driver covers the other Pixel combo chips too (BCM4389, BCM4398);
+	  husky (Pixel 8 Pro, BCM4398) builds it in with the option below.
+
+config BCMDHD_BCM4390_FOR_BCM4398
+	bool "Build for the BCM4398 (husky) instead of the BCM4390"
+	depends on BCMDHD_BCM4390
+	help
+	  The driver is built for one chip at a time: its PCI ID table and the
+	  chip-specific code follow the chip chosen at build time. Say Y for
+	  the Pixel 8 Pro (husky, 14e4:4444); leave N for komodo's BCM4390.
+
+config BCMDHD_BCM4390_VENDOR_FW_NAMES
+	bool "Load firmware under the Pixel vendor file names"
+	depends on BCMDHD_BCM4390
+	help
+	  Request bcmdhd/fw_bcmdhd.bin, bcmdhd/bcmdhd.cal, bcmdhd/bcmdhd_clm.blob,
+	  bcmdhd/bcmdhd_txcap.blob and bcmdhd/fw_bcmdhd.map, to which the driver
+	  appends the chip and revision (for example fw_bcmdhd.bin_4398_c0).
+	  These are the names the files carry on the phone's vendor partition.
+	  Without this, the brcmfmac4390b1-pcie names komodo uses are requested.

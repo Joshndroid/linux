@@ -20,7 +20,11 @@
 # <<Broadcom-WL-IPTag/Dual:>>
 #
 
+ifneq ($(CONFIG_BCMDHD_BCM4390_FOR_BCM4398),)
+BCMDHD := 4398
+else
 BCMDHD := 4390
+endif
 
 # NOTE(mainline): built in-tree at drivers/net/wireless/broadcom/bcmdhd/bcm4390
 # (not under google-modules). Force the Google platform path on -- mainline has
@@ -195,6 +199,15 @@ endif
 
 # if DHD_LINUX_STD_FW_API defined add only file names else add full path
 ifneq ($(filter -DDHD_LINUX_STD_FW_API, $(DHDCFLAGS)),)
+ifneq ($(CONFIG_BCMDHD_BCM4390_VENDOR_FW_NAMES),)
+  # Pixel vendor partition names; the driver appends _<chip>_<rev> (and the
+  # module VID string for the NVRAM), e.g. bcmdhd/fw_bcmdhd.bin_4398_c0.
+  DHDCFLAGS += -DDHD_FW_NAME="\"bcmdhd/fw_bcmdhd.bin\""
+  DHDCFLAGS += -DDHD_NVRAM_NAME="\"bcmdhd/bcmdhd.cal\""
+  DHDCFLAGS += -DDHD_CLM_NAME="\"bcmdhd/bcmdhd_clm.blob\""
+  DHDCFLAGS += -DDHD_MAP_NAME="\"bcmdhd/fw_bcmdhd.map\""
+  DHDCFLAGS += -DDHD_TXCAP_NAME="\"bcmdhd/bcmdhd_txcap.blob\""
+else
   # NOTE(mainline): reuse the brcmfmac firmware already staged under
   # /lib/firmware/brcm/ (identical BCM4390 b1 blobs) instead of dhd-named copies.
   DHDCFLAGS += -DDHD_FW_NAME="\"brcm/brcmfmac4390b1-pcie.bin\""
@@ -202,6 +215,7 @@ ifneq ($(filter -DDHD_LINUX_STD_FW_API, $(DHDCFLAGS)),)
   DHDCFLAGS += -DDHD_CLM_NAME="\"brcm/brcmfmac4390b1-pcie.clm_blob\""
   DHDCFLAGS += -DDHD_MAP_NAME="\"brcm/brcmfmac4390b1-pcie.map\""
   DHDCFLAGS += -DDHD_TXCAP_NAME="\"brcm/brcmfmac4390b1-pcie.txcap_blob\""
+endif
 else
   CONFIG_BCMDHD_FW_PATH="\"/vendor/firmware/fw_bcmdhd.bin\""
   CONFIG_BCMDHD_NVRAM_PATH="\"/vendor/firmware/bcmdhd.cal\""
@@ -877,6 +891,11 @@ endif
 # m: module type driver
 # y: built-in type driver
 ##########################
+# NOTE(mainline): in-tree, CONFIG_BCMDHD is left empty (forced to m above), so
+# take built-in vs module from the in-tree gate.
+ifneq ($(CONFIG_BCMDHD_BCM4390),)
+  DRIVER_TYPE ?= $(CONFIG_BCMDHD_BCM4390)
+endif
 DRIVER_TYPE ?= $(CONFIG_BCMDHD)
 
 #########################

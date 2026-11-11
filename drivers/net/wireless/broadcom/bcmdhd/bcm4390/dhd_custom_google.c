@@ -31,6 +31,8 @@
 #include <linux/fcntl.h>
 #include <linux/fs.h>
 #include <linux/of_gpio.h>
+#include <linux/of_net.h>
+#include <linux/etherdevice.h>
 #include <bcmutils.h>
 #ifdef CONFIG_WIFI_CONTROL_FUNC
 #include <linux/wlan_plat.h>
@@ -471,12 +473,23 @@ dhd_wlan_init_mac_addr(void)
 	unsigned int mac_found = 0;
 
 	node = of_find_node_by_path(CDB_PATH);
-	if (!node) {
-		DHD_ERROR(("CDB Node not created under %s\n", CDB_PATH));
-		return -ENODEV;
-	} else {
+	if (node)
 		mac_addr = (unsigned char *)
 				of_get_property(node, WIFI_MAC, &size);
+
+	/* NOTE(mainline): the native DT carries the provisioned address as the
+	 * standard local-mac-address of the wlan node (copied from the
+	 * bootloader's /chosen/config/wlan_mac1 at boot) rather than the
+	 * vendor's private /chosen/config subtree. */
+	if (!mac_addr) {
+		node = of_find_compatible_node(NULL, NULL, DHD_DT_COMPAT_ENTRY);
+		if (node && !of_get_mac_address(node, mac) &&
+		    is_valid_ether_addr(mac)) {
+			memcpy(wlan_mac, mac, sizeof(mac));
+			of_node_put(node);
+			return 0;
+		}
+		of_node_put(node);
 	}
 
 	/* In case Missing Provisioned MAC Address, exit with error */

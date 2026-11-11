@@ -39,18 +39,21 @@ enum google_pcie_callback_type {
 /* Resolve the Wi-Fi RC controller device from the endpoint's PCIe domain. */
 static inline struct device *google_pcie_wifi_rc_dev(int ch_num)
 {
-	/* Resolve by the BCM4390 vendor:device, NOT by ch_num/domain. The DT
-	 * ch-num (=1) maps to the wrong PCIe controller -- pci_find_bus(1,1)
-	 * lands on the MODEM's domain (12100000.pcie), not the Wi-Fi's
-	 * (13120000.pcie, domain 0). Find the actual Wi-Fi endpoint (14e4:4438,
-	 * OTP-alt 14e4:4390) and return its root complex device. */
-	struct pci_dev *ep = pci_get_device(0x14e4, 0x4438, NULL);
+	/* Resolve by the Wi-Fi endpoint's vendor:device, NOT by ch_num/domain.
+	 * On komodo the DT ch-num (=1) maps to the wrong PCIe controller --
+	 * pci_find_bus(1,1) lands on the MODEM's domain (12100000.pcie), not the
+	 * Wi-Fi's (13120000.pcie, domain 0). Find the actual Wi-Fi endpoint and
+	 * return its root complex device: BCM4390 (14e4:4438, OTP-alt 4390) on
+	 * zumapro, BCM4398 (14e4:4444, OTP-alt 4398) on zuma (husky). */
+	static const unsigned short wifi_ids[] = { 0x4438, 0x4390, 0x4444, 0x4398 };
+	struct pci_dev *ep = NULL;
 	struct pci_host_bridge *hb;
 	struct device *rc = NULL;
+	int i;
 
 	(void)ch_num;
-	if (!ep)
-		ep = pci_get_device(0x14e4, 0x4390, NULL);
+	for (i = 0; !ep && i < ARRAY_SIZE(wifi_ids); i++)
+		ep = pci_get_device(0x14e4, wifi_ids[i], NULL);
 	if (!ep)
 		return NULL;
 	hb = pci_find_host_bridge(ep->bus);
