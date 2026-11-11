@@ -83,6 +83,8 @@
 #define GS_CLUSTER1_NONCPU_INT_EN		0x1444
 #define GS_CLUSTER2_NONCPU_INT_EN		0x1644
 #define GS_RST_STAT_REG_OFFSET			0x3B44
+#define ZUMA_CLUSTER1_NONCPU_OUT		0x1520
+#define ZUMA_CLUSTER1_NONCPU_INT_EN		0x1544
 
 #define EXYNOS990_CLUSTER2_NONCPU_OUT		0x1620
 #define EXYNOS990_CLUSTER2_NONCPU_INT_EN	0x1644
@@ -344,6 +346,33 @@ static const struct s3c2410_wdt_variant drv_data_gs101_cl1 = {
 		  QUIRK_HAS_DBGACK_BIT,
 };
 
+/* Tensor G3: same PMU block as gs101, but CNT_EN is bit 4 and CL1 moved. */
+static const struct s3c2410_wdt_variant drv_data_zuma_cl0 = {
+	.mask_reset_reg = GS_CLUSTER0_NONCPU_INT_EN,
+	.mask_bit = 2,
+	.mask_reset_inv = true,
+	.rst_stat_reg = GS_RST_STAT_REG_OFFSET,
+	.rst_stat_bit = 0,
+	.cnt_en_reg = GS_CLUSTER0_NONCPU_OUT,
+	.cnt_en_bit = 4,
+	.quirks = QUIRK_HAS_PMU_RST_STAT | QUIRK_HAS_PMU_MASK_RESET |
+		  QUIRK_HAS_PMU_CNT_EN | QUIRK_HAS_WTCLRINT_REG |
+		  QUIRK_HAS_DBGACK_BIT,
+};
+
+static const struct s3c2410_wdt_variant drv_data_zuma_cl1 = {
+	.mask_reset_reg = ZUMA_CLUSTER1_NONCPU_INT_EN,
+	.mask_bit = 2,
+	.mask_reset_inv = true,
+	.rst_stat_reg = GS_RST_STAT_REG_OFFSET,
+	.rst_stat_bit = 1,
+	.cnt_en_reg = ZUMA_CLUSTER1_NONCPU_OUT,
+	.cnt_en_bit = 4,
+	.quirks = QUIRK_HAS_PMU_RST_STAT | QUIRK_HAS_PMU_MASK_RESET |
+		  QUIRK_HAS_PMU_CNT_EN | QUIRK_HAS_WTCLRINT_REG |
+		  QUIRK_HAS_DBGACK_BIT,
+};
+
 static const struct s3c2410_wdt_variant drv_data_exynosautov920_cl0 = {
 	.mask_reset_reg = EXYNOSAUTOV920_CLUSTER0_NONCPU_INT_EN,
 	.mask_bit = 2,
@@ -373,6 +402,8 @@ static const struct s3c2410_wdt_variant drv_data_exynosautov920_cl1 = {
 static const struct of_device_id s3c2410_wdt_match[] = {
 	{ .compatible = "google,gs101-wdt",
 	  .data = &drv_data_gs101_cl0 },
+	{ .compatible = "google,zuma-wdt",
+	  .data = &drv_data_zuma_cl0 },
 	{ .compatible = "samsung,s3c6410-wdt",
 	  .data = &drv_data_s3c6410 },
 	{ .compatible = "samsung,exynos5250-wdt",
@@ -707,6 +738,7 @@ s3c2410_get_wdt_drv_data(struct platform_device *pdev, struct s3c2410_wdt *wdt)
 	if (variant == &drv_data_exynos850_cl0 ||
 	    variant == &drv_data_exynosautov9_cl0 ||
 	    variant == &drv_data_gs101_cl0 ||
+	    variant == &drv_data_zuma_cl0 ||
 	    variant == &drv_data_exynosautov920_cl0 ||
 	    variant == &drv_data_exynos990_cl0) {
 		u32 index;
@@ -727,6 +759,8 @@ s3c2410_get_wdt_drv_data(struct platform_device *pdev, struct s3c2410_wdt *wdt)
 				variant = &drv_data_exynosautov9_cl1;
 			else if (variant == &drv_data_gs101_cl0)
 				variant = &drv_data_gs101_cl1;
+			else if (variant == &drv_data_zuma_cl0)
+				variant = &drv_data_zuma_cl1;
 			else if (variant == &drv_data_exynosautov920_cl0)
 				variant = &drv_data_exynosautov920_cl1;
 			break;
