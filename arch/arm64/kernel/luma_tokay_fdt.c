@@ -81,6 +81,63 @@ int __init luma_tokay_import_bluetooth_address(const void *original)
 					"local-bd-address", true);
 }
 
+/* The Pixel Wi-Fi/BT drivers pick region- and revision-specific firmware files
+ * from the hardware stage/revision in /chosen/plat and the SKU in
+ * /chosen/config. Copy only those (never the IMEIs, serials or other per-unit
+ * data the bootloader also puts there: /proc/device-tree is world-readable)
+ * into native /chosen/plat and /chosen/config nodes, if the board's DT
+ * declares them.
+ */
+static int __init luma_copy_props(const void *original, const char *path,
+				  const char *const *names)
+{
+	struct device_node *node;
+	int src, n = 0;
+
+	src = fdt_path_offset(original, path);
+	if (src < 0)
+		return -ENOENT;
+	node = of_find_node_by_path(path);
+	if (!node)
+		return -ENODEV;
+	for (; *names; names++) {
+		struct property *prop;
+		const void *val;
+		int len;
+
+		val = fdt_getprop(original, src, *names, &len);
+		if (!val || len <= 0 || len > 64 || of_find_property(node, *names, NULL))
+			continue;
+		prop = kzalloc(sizeof(*prop), GFP_KERNEL);
+		if (!prop)
+			break;
+		prop->name = kstrdup(*names, GFP_KERNEL);
+		prop->value = kmemdup(val, len, GFP_KERNEL);
+		prop->length = len;
+		OF_MARK_DYNAMIC(prop);
+		if (!prop->name || !prop->value || of_add_property(node, prop)) {
+			kfree(prop->name);
+			kfree(prop->value);
+			kfree(prop);
+			continue;
+		}
+		n++;
+	}
+	of_node_put(node);
+	return n;
+}
+
+int __init luma_import_board_info(const void *original)
+{
+	/* product + stage/major/minor/variant compose the CDT the AoC sensor registry filters on */
+	static const char *const plat[] = { "product", "stage", "major", "minor", "variant", NULL };
+	static const char *const config[] = { "sku", NULL };
+	int a = luma_copy_props(original, "/chosen/plat", plat);
+	int b = luma_copy_props(original, "/chosen/config", config);
+
+	return a < 0 ? a : b < 0 ? b : a + b;
+}
+
 static bool __init node_available(const void *fdt, int node)
 {
 	int len;
@@ -161,6 +218,53 @@ static bool __init protect_range(phys_addr_t base, phys_addr_t size, bool nomap)
 	if (ret)
 		panic("Luma FDT: cannot retain firmware reservation");
 	return true;
+}
+
+/*
+ * Import the RAM banks the bootloader describes.  The embedded DT need not
+ * know the board's memory map (it differs by SKU, and the bootloader may load
+ * the kernel and initramfs into any bank); the bootloader's /memory nodes are
+ * authoritative.  memblock merges banks the embedded DT already lists.
+ * Must run before the firmware reservations, which skip non-memory ranges.
+ */
+void __init luma_import_memory(const void *original)
+{
+	int root, ac, sc, node, banks = 0;
+	phys_addr_t total = 0;
+
+	if (fdt_check_header(original))
+		panic("Luma FDT: malformed original header");
+	root = fdt_path_offset(original, "/");
+	ac = fdt_address_cells(original, root);
+	sc = fdt_size_cells(original, root);
+	if (ac < 1 || ac > 2 || sc < 1 || sc > 2)
+		panic("Luma FDT: unsupported root cells");
+
+	fdt_for_each_subnode(node, original, root) {
+		const char *type = fdt_getprop(original, node, "device_type", NULL);
+		int len, i, cells = ac + sc;
+		const __be32 *reg;
+
+		if (!type || strcmp(type, "memory") || !node_available(original, node))
+			continue;
+		reg = fdt_getprop(original, node, "reg", &len);
+		if (!reg || len % (cells * sizeof(*reg)))
+			continue;
+		for (i = 0; i < len / sizeof(*reg); i += cells) {
+			phys_addr_t base = of_read_number(reg + i, ac);
+			phys_addr_t size = of_read_number(reg + i + ac, sc);
+
+			if (!size || base + size < base)
+				continue;
+			if (memblock_add(base, size))
+				panic("Luma FDT: cannot add bootloader memory bank");
+			pr_info("Luma lab: bootloader memory %pa+%pa\n", &base, &size);
+			banks++;
+			total += size;
+		}
+	}
+	pr_info("Luma lab: imported %d bootloader memory banks, %llu MiB\n",
+		banks, (unsigned long long)(total >> 20));
 }
 
 void __init luma_tokay_reserve_firmware(const void *original)

@@ -5,7 +5,7 @@
 	.section ".init.rodata", "a"
 	.balign 8
 SYM_DATA_START(__luma_tokay_dtb_start)
-	.incbin "arch/arm64/boot/dts/exynos/google/zumapro-tokay.dtb"
+	.incbin LUMA_EMBEDDED_DTB
 SYM_DATA_END(__luma_tokay_dtb_start)
 
 	.globl __luma_tokay_dtb_end

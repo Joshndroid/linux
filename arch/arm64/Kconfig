@@ -2528,6 +2528,15 @@ config LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
 	  This is an explicit Project Luma bring-up option, not a general arm64
 	  boot protocol and not suitable for a multi-device release kernel.
 
+config LUMA_EMBEDDED_DTB
+	string "Device tree embedded by the Luma diagnostic boot"
+	depends on LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+	default "exynos/google/zumapro-tokay"
+	help
+	  Path of the DTB, relative to arch/arm64/boot/dts and without the
+	  .dtb suffix, that LUMA_TOKAY_EMBEDDED_DIAGNOSTIC links into the
+	  kernel, e.g. "exynos/google/zuma-husky" for the Pixel 8 Pro.
+
 config EFI_STUB
 	bool
 

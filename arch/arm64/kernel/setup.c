@@ -180,9 +180,10 @@ static const void *luma_bootloader_fdt_virtual __initdata;
 static phys_addr_t luma_bootloader_fdt_phys;
 static int luma_bootloader_fdt_size;
 
-static int __init luma_bootloader_fdt_sysfs_init(void)
+/* Before device_initcall: the Wi-Fi platform glue reads the address and board
+ * info when it initialises (bcmdhd's dhd_wlan_init is a device_initcall). */
+static int __init luma_bootloader_fdt_import(void)
 {
-	static __ro_after_init BIN_ATTR_SIMPLE_ADMIN_RO(luma_bootloader_fdt);
 	void *blob;
 	int ret;
 
@@ -198,6 +199,26 @@ static int __init luma_bootloader_fdt_sysfs_init(void)
 	ret = luma_tokay_import_bluetooth_address(blob);
 	if (ret)
 		pr_warn("Luma lab: provisioned Bluetooth address unavailable (%d)\n", ret);
+	ret = luma_import_board_info(blob);
+	if (ret >= 0)
+		pr_info("Luma lab: imported %d board-info properties\n", ret);
+	memunmap(blob);
+	return 0;
+}
+subsys_initcall(luma_bootloader_fdt_import);
+
+static int __init luma_bootloader_fdt_sysfs_init(void)
+{
+	static __ro_after_init BIN_ATTR_SIMPLE_ADMIN_RO(luma_bootloader_fdt);
+	void *blob;
+	int ret;
+
+	if (!luma_bootloader_fdt_size)
+		return 0;
+	blob = memremap(luma_bootloader_fdt_phys, luma_bootloader_fdt_size,
+			MEMREMAP_WB);
+	if (!blob)
+		return -ENOMEM;
 	bin_attr_luma_bootloader_fdt.private = blob;
 	bin_attr_luma_bootloader_fdt.size = luma_bootloader_fdt_size;
 	ret = sysfs_create_bin_file(firmware_kobj, &bin_attr_luma_bootloader_fdt);
@@ -350,8 +371,10 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	setup_machine_fdt(__fdt_pointer);
 #ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
-	if (luma_bootloader_fdt_virtual)
+	if (luma_bootloader_fdt_virtual) {
+		luma_import_memory(luma_bootloader_fdt_virtual);
 		luma_tokay_reserve_firmware(luma_bootloader_fdt_virtual);
+	}
 #endif
 
 	/*
