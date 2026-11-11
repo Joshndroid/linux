@@ -1240,6 +1240,17 @@ config TOUCHSCREEN_ST1232
 	  To compile this driver as a module, choose M here: the
 	  module will be called st1232_ts.
 
+config TOUCHSCREEN_FTM5_SPI
+	tristate "STMicroelectronics FTM5 SPI touchscreen"
+	depends on SPI && OF
+	depends on DRM || !DRM
+	help
+	  Say Y here to enable the ST FingerTipS FTM5 touchscreen
+	  controller on a 4-wire SPI bus, as used on the Pixel 8 Pro.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called ftm5-spi.
+
 config TOUCHSCREEN_STMFTS
 	tristate "STMicroelectronics STMFTS touchscreen"
 	depends on I2C
