@@ -14,8 +14,10 @@ phone userdata image and `ostree=aboot`; Luma's
 `scripts/mobile/husky/build-boot.sh` refuses a config that differs.
 
 Google's firmware for Wi-Fi (BCM4398), Bluetooth, the AoC, the CS35L41
-speaker amplifiers and the CS40L26 haptics is not redistributable. It is
-read from the phone's own vendor partition and is never part of this tree.
+speaker amplifiers and the CS40L26 haptics is not redistributable and is
+never part of this tree. SimplyLuma/luma `scripts/mobile/husky/firmware.py`
+extracts it from Google's factory image, checked against
+`devices/google/husky/firmware.manifest`, and the boot image carries it.
 
 `../tools/ect-decode.py` and `../tools/fvmap-decode.py` regenerate the CPU
 OPP tables in `zuma.dtsi` from the bootloader's ECT and ACPM's fvmap.
