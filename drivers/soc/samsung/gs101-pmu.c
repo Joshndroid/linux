@@ -349,6 +349,16 @@ const struct exynos_pmu_data zumapro_pmu_data = {
 };
 
 /*
+ * Zuma (Tensor G3) has the same EL3-protected PMU_ALIVE.  Only secure
+ * register access is enabled (UFS and USB PHY isolation): the zumapro SICD
+ * CPU_INFORM hints were measured on zumapro's eight cores and are left off
+ * until they are verified against zuma's nine.
+ */
+const struct exynos_pmu_data zuma_pmu_data = {
+	.pmu_secure = true,
+};
+
+/*
  * Tensor SoCs are configured so that PMU_ALIVE registers can only be written
  * from EL3, but are still read accessible. As Linux needs to write some of
  * these registers, the following functions are provided and exposed via
