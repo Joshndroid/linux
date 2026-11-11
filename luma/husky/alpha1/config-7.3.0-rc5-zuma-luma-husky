@@ -611,7 +611,7 @@ CONFIG_ARM64_CONTPTE=y
 #
 # Boot options
 #
-CONFIG_CMDLINE="reboot=warm panic=0 rdinit=/init loglevel=7 printk.time=1 clk_ignore_unused pd_ignore_unused regulator_ignore_unused arm64.nomte fbcon=font:TER16x32 ostree=aboot androidboot.slot_suffix=_a systemd.show_status=1"
+CONFIG_CMDLINE="reboot=warm panic=0 rdinit=/init loglevel=7 printk.time=1 clk_ignore_unused pd_ignore_unused regulator_ignore_unused arm64.nomte fbcon=font:TER16x32 androidboot.slot_suffix=_a systemd.show_status=1 pmos_root_uuid=03797c05-cf87-4eda-adc4-6ce111baf2d3 pmos_boot_uuid=032D-57AD ostree=aboot"
 # CONFIG_CMDLINE_FROM_BOOTLOADER is not set
 CONFIG_CMDLINE_FORCE=y
 CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC=y
