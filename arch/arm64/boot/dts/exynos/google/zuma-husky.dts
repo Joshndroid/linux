@@ -1,0 +1,762 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Google Pixel 8 Pro (husky) device tree.
+ *
+ * Described and working: UFS, USB peripheral, buttons, ramoops, the s2mpg14/15
+ * PMICs, the HK3 panel through DECON/DSIM, FTM5 touch (with double-tap wake),
+ * the Mali-G715 GPU, CPU DVFS and thermal, the MAX77759 fuel gauge, TCPC and
+ * charger, CS40L26 haptics, the AoC (sensors, audio, Bluetooth) and the
+ * BCM4398 Wi-Fi on PCIe. Not described yet: the Exynos 5300 modem, cameras,
+ * fingerprint, USB host/dual-role and USB PD fast charging. Clocks, power
+ * domains and regulators the kernel does not model yet stay as the
+ * bootloader left them (clk/pd/regulator_ignore_unused).
+ *
+ * Board values come from kernel/devices/google/shusky and .../zuma,
+ * branch android-gs-shusky-6.1-android16:
+ *  - keys gpa4-0 / gpa4-1 / gpa6-2 (zuma-common.dtsi) -- same as zumapro;
+ *  - UFS VCC enable on gpp0-1 (zuma-ufs.dtsi);
+ *  - eUSB2 repeater @0x3e on hsi2c_11, with shusky's tuning
+ *    (zuma-shusky-usb.dtsi; zumapro boards use hsi2c_9);
+ *  - DECON0 at 0x19470000 (zuma-drm-dpu.dtsi), so the zumapro boards'
+ *    autorefresh trick applies unchanged.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/usb/pd.h>
+#include "zumapro-pinctrl.h"
+#include "zuma.dtsi"
+#include "zumapro-caimito-cs35l41.dtsi"
+
+/ {
+	model = "Google Pixel 8 Pro";
+	compatible = "google,husky", "google,zuma-husky", "google,zuma";
+	chassis-type = "handset";
+
+	aliases {
+		serial0 = &serial_0;
+	};
+
+	chosen {
+		/*
+		 * The bootloader requires bootargs to exist.  Stage 1 adds
+		 * verbose logging and keeps clocks/power domains the bootloader
+		 * enabled; panic reboots after 5 s so ramoops can be read on
+		 * the next boot.
+		 */
+		bootargs = "clk_ignore_unused pd_ignore_unused loglevel=8 panic=5 softlockup_panic=1 reboot=warm";
+
+		/* Filled at boot with an allowlist of the bootloader's board info
+		 * (stage/major/minor, sku), which the Wi-Fi driver uses to pick
+		 * region files; see luma_import_board_info(). */
+		config {
+		};
+
+		plat {
+		};
+
+		framebuffer0: framebuffer-0 {
+			compatible = "simple-framebuffer";
+			memory-region = <&cont_splash_mem>;
+			width = <1344>;
+			height = <2992>;
+			stride = <(1344 * 4)>;
+			format = "a8r8g8b8";
+		};
+	};
+
+	/*
+	 * Stage 1 describes only the first 2 GiB bank (inherited from
+	 * zumapro.dtsi), which every zuma board has.  The real layout is in the
+	 * bootloader's FDT, exported at /sys/firmware/luma_bootloader_fdt;
+	 * read it on the first boot and add the remaining 10 GiB here.
+	 */
+
+	reserved-memory {
+		/*
+		 * Bootloader splash.  0xfac00000 is where the zumapro Pixel
+		 * bootloaders place it; verify against the bootloader FDT on
+		 * the first boot.  1344 x 2992 x 4 bytes.
+		 */
+		cont_splash_mem: splash@fac00000 {
+			reg = <0x0 0xfac00000 (1344 * 2992 * 4)>;
+			no-map;
+		};
+	};
+
+	/*
+	 * The panel runs in command mode: without auto-refresh the DECON never
+	 * pushes the splash buffer again and nothing the console draws shows.
+	 */
+	decon_autorefresh_bit: mmio-init@19470030 {
+		compatible = "linux,mmio-init-helper";
+		reg = <0 0x19470030 0x4>;
+		value = <0x3061>;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&key_voldown>, <&key_volup>, <&key_power>;
+		pinctrl-names = "default";
+
+		button-vol-down {
+			label = "KEY_VOLUMEDOWN";
+			linux,code = <KEY_VOLUMEDOWN>;
+			gpios = <&gpa4 1 GPIO_ACTIVE_LOW>;
+			wakeup-source;
+		};
+
+		button-vol-up {
+			label = "KEY_VOLUMEUP";
+			linux,code = <KEY_VOLUMEUP>;
+			gpios = <&gpa6 2 GPIO_ACTIVE_LOW>;
+			wakeup-source;
+		};
+
+		button-power {
+			label = "KEY_POWER";
+			linux,code = <KEY_POWER>;
+			gpios = <&gpa4 0 GPIO_ACTIVE_LOW>;
+			wakeup-source;
+		};
+	};
+
+	/* Stands in for PMIC rails the bootloader already enabled. */
+	reg_placeholder: regulator-0 {
+		compatible = "regulator-fixed";
+		regulator-name = "placeholder_reg";
+	};
+
+	ufs_0_fixed_vcc_reg: regulator-1 {
+		compatible = "regulator-fixed";
+		regulator-name = "ufs-vcc";
+		gpio = <&gpp0 1 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		/* Nothing else holds it; without always-on the rootfs loses power. */
+		regulator-always-on;
+	};
+};
+
+&pinctrl_gpio_alive {
+	key_power: key-power-pins {
+		samsung,pins = "gpa4-0";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_UP>;
+		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
+	};
+
+	key_volup: key-volup-pins {
+		samsung,pins = "gpa6-2";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
+	};
+
+	key_voldown: key-voldown-pins {
+		samsung,pins = "gpa4-1";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
+	};
+
+	/* FG_INT_L, XEINT_21 (zuma-shusky-battery.dtsi if_pmic_fg_irq) */
+	if_pmic_fg_int: if-pmic-fg-int-pins {
+		samsung,pins = "gpa7-7";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_UP>;
+	};
+
+	/* USB_PD_INT_L (max777x9-tcpc.dtsi usb_pd_irq), as Pixel 9 */
+	typec_int: typec-int-pins {
+		samsung,pins = "gpa8-3";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_UP>;
+		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
+	};
+
+	/* IF_PMIC_INT_L (zuma-shusky-battery.dtsi if_pmic_irq), as Pixel 9 */
+	if_pmic_int: if-pmic-int-pins {
+		samsung,pins = "gpa8-0";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_UP>;
+		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
+	};
+
+	/* Haptics IRQ, XEINT_11 (zuma-shusky-haptics.dtsi hapt_amp1_irq) */
+	hapt_amp1_irq: hapt-amp1-irq-pins {
+		samsung,pins = "gpa6-3";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+	};
+};
+
+&pinctrl_hsi1 {
+	/* Haptics reset (active low) and trigger, XHSI1_GPIO13 / GPIO10 */
+	hapt_amp1_rst: hapt-amp1-rst-pins {
+		samsung,pins = "gph2-3";
+		samsung,pin-function = <GS101_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+	};
+
+	hapt_amp_trig: hapt-amp-trig-pins {
+		samsung,pins = "gph2-0";
+		samsung,pin-function = <GS101_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+	};
+};
+
+&ext_24_5m {
+	clock-frequency = <24576000>;
+};
+
+&ext_200m {
+	clock-frequency = <200000000>;
+};
+
+&ext_26m {
+	clock-frequency = <26000000>;
+};
+
+&ext_1m {
+	clock-frequency = <1000000>;
+};
+
+&serial_0 {
+	status = "okay";
+};
+
+&usi_uart {
+	samsung,clkreq-on;
+	status = "okay";
+};
+
+&ufs_0 {
+	vcc-supply = <&ufs_0_fixed_vcc_reg>;
+	vdd-hba-supply = <&reg_placeholder>;
+	vccq-supply = <&reg_placeholder>;
+	vccq2-supply = <&reg_placeholder>;
+	vcc-max-microamp = <0>;
+	vccq-max-microamp = <0>;
+	vccq2-max-microamp = <0>;
+	status = "okay";
+};
+
+&ufs_0_phy {
+	status = "okay";
+};
+
+/* USB: peripheral only (no USB-C controller yet), for the NCM gadget. */
+&usbdrd31 {
+	vdd10-supply = <&reg_placeholder>;
+	vdd33-supply = <&reg_placeholder>;
+	status = "okay";
+};
+
+&usbdrd31_dwc3 {
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	status = "okay";
+};
+
+&usbdrd31_phy {
+	pll-supply = <&reg_placeholder>;
+	dvdd-usb20-supply = <&reg_placeholder>;
+	vddh-usb20-supply = <&reg_placeholder>;
+	vdd33-usb20-supply = <&reg_placeholder>;
+	vdda-usbdp-supply = <&reg_placeholder>;
+	vddh-usbdp-supply = <&reg_placeholder>;
+	status = "okay";
+};
+
+&usb_hsphy {
+	status = "okay";
+};
+
+/*
+ * Haptics: Cirrus CS40L26A on hsi2c_0 @0x43, values from
+ * zuma-shusky-haptics.dtsi. The driver (drivers/input/misc/cs40l26, from
+ * Google's downstream) loads cs40l26.wmfw and the cs40l26*.bin wavetables
+ * from husky's vendor partition; they are not redistributable and are never
+ * shipped with the kernel. VA/VP have no regulator here: the bootloader leaves
+ * both on. The ASoC codec child (haptics from the AoC audio path) is not
+ * described yet.
+ */
+&usi0 {
+	samsung,mode = <USI_MODE_I2C>;
+	status = "okay";
+};
+
+&hsi2c_0 {
+	clock-frequency = <1000000>;
+	status = "okay";
+
+	haptics@43 {
+		compatible = "cirrus,cs40l26a";
+		reg = <0x43>;
+		input-device-name = "cs40l26_input";
+		pinctrl-0 = <&hapt_amp1_irq>, <&hapt_amp1_rst>, <&hapt_amp_trig>;
+		pinctrl-names = "default";
+		interrupts-extended = <&gpa6 3 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gph2 3 GPIO_ACTIVE_LOW>;
+
+		cirrus,bst-dcm-en = <0>;
+		cirrus,pwle-zero-cross-en;
+		cirrus,vpbr-enable;
+		cirrus,vpbr-thld-uv = <3008000>;	/* 3.008 V */
+		cirrus,bst-expl-mode-disable;
+		cirrus,bst-ipk-microamp = <2500000>;	/* 2.5 A */
+		cirrus,bst-ctl-microvolt = <11000000>;	/* 11 V */
+		cirrus,f0-default = <0x244000>;		/* 145 Hz */
+		cirrus,redc-default = <0x68000>;	/* 13 Ohm */
+		cirrus,pm-active-timeout-ms = <5>;
+	};
+};
+
+&usi11 {
+	samsung,mode = <USI_MODE_I2C>;
+	status = "okay";
+};
+
+&hsi2c_11 {
+	status = "okay";
+
+	eusb_repeater: eusb-repeater@3e {
+		compatible = "samsung,eusb-repeater";
+		reg = <0x3e>;
+		#phy-cells = <0>;
+		vdd33-supply = <&reg_placeholder>;
+		/* zuma-shusky-usb.dtsi repeater_tune1..8 */
+		samsung,tune-param = <0x50 0x0a>,
+				     <0x70 0x3c>,
+				     <0x71 0x2c>,
+				     <0x72 0x90>,
+				     <0x73 0x83>,
+				     <0x77 0x00>,
+				     <0x78 0x0b>,
+				     <0x79 0x40>;
+	};
+
+	/*
+	 * The MAX77759's fuel gauge (zuma-shusky-battery.dtsi max77759_fg),
+	 * read-only: with no monitored-battery the driver never reprograms
+	 * the gauge, so it keeps the model Android learned.
+	 */
+	fuel-gauge@36 {
+		compatible = "maxim,max77759-fg";
+		reg = <0x36>;
+		pinctrl-0 = <&if_pmic_fg_int>;
+		pinctrl-names = "default";
+		interrupts-extended = <&gpa7 7 IRQ_TYPE_LEVEL_LOW>;
+		/* maxim,rsense-default = <500> (10 uOhm units) */
+		shunt-resistor-micro-ohms = <5000>;
+	};
+
+	/*
+	 * USB-C: the MAX77759 TCPC as a sink-only, device-only port with PD
+	 * off, and no role-switch/orientation links, so it never sources VBUS
+	 * or moves the dwc3 off the peripheral role. Its job is to tell the
+	 * charger what the source offers (Rp current). Until the charger
+	 * driver loads, charging stays as the bootloader set it. Dual-role,
+	 * PD/PPS and the PCA9468 fast charger come later.
+	 */
+	usb-typec@25 {
+		compatible = "maxim,max77759-tcpci", "maxim,max33359";
+		reg = <0x25>;
+		interrupts-extended = <&gpa8 3 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-0 = <&typec_int>;
+		pinctrl-names = "default";
+
+		connector {
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			data-role = "device";
+			power-role = "sink";
+			self-powered;
+			op-sink-microwatt = <2600000>;
+			slow-charger-loop;
+			sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)>;
+			pd-disable;
+			typec-power-opmode = "default";
+		};
+	};
+
+	/*
+	 * The MAX77759 PMIC: its MFD creates the charger cell. The mainline
+	 * charger switches charging off at probe and back on only while the
+	 * TCPC reports a source; it programs the battery node below, which
+	 * repeats exactly what husky's bootloader leaves set (CHG_CNFG_02
+	 * 0x1d = 1.933 A, CHG_CNFG_04 0x23 = 4.35 V). Stock
+	 * Android steps 4.20-4.48 V by temperature (zuma-shusky-battery.dtsi);
+	 * neither the bootloader nor this does, so stay at the bootloader's
+	 * values.
+	 */
+	pmic@66 {
+		compatible = "maxim,max77759";
+		reg = <0x66>;
+		pinctrl-0 = <&if_pmic_int>;
+		pinctrl-names = "default";
+		interrupts-extended = <&gpa8 0 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+		monitored-battery = <&battery>;
+
+		gpio {
+			compatible = "maxim,max77759-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
+	};
+};
+
+/ {
+	battery: battery {
+		compatible = "simple-battery";
+		charge-full-design-microamp-hours = <4950000>;
+		constant-charge-current-max-microamp = <1933420>;
+		constant-charge-voltage-max-microvolt = <4350000>;
+	};
+};
+
+/* Ramoops geometry matching the zumapro boards' stock layout. */
+&{/reserved-memory/ramoops@fd3ff000} {
+	record-size = <0>;
+	console-size = <0x200000>;
+	pmsg-size = <0x200000>;
+};
+
+/* Everything not yet driven stays off. */
+
+/*
+ * AoC (Always-On Compute): audio, sensors and the Bluetooth HCI path.  Same
+ * blocks and carveout as zumapro; husky's own image from the vendor partition
+ * (firmware/aoc.bin, not redistributable) staged as google/zuma/aoc.bin.
+ * Board id/rev from downstream zuma-husky-audio.dtsi (aoc-board-cfg "HK3").
+ */
+&gsa {
+	status = "okay";
+};
+
+&aoc {
+	firmware-name = "google/zuma/aoc.bin";
+	aoc-board-id = <0x40202>;
+	aoc-board-rev = <0x10000>;
+
+	sensor_1v8-supply = <&s_ldo7_reg>;
+	sensor_3v3-supply = <&s_ldo5_reg>;
+
+	/*
+	 * husky's sensor registry: /vendor/etc/sensors/registry, copied
+	 * unmodified.  Each script filters itself by the CDT built from
+	 * /chosen/plat; common first, stage scripts, then the appends.
+	 */
+	google,usf-registry = "google/usf/husky/husky_common.reg",
+			      "google/usf/husky/husky_proto_1_0.reg",
+			      "google/usf/husky/husky_proto_1_1.reg",
+			      "google/usf/husky/husky_evt.reg",
+			      "google/usf/husky/husky_dvt.reg",
+			      "google/usf/husky/append/motion_state.reg",
+			      "google/usf/husky/append/power.reg";
+	status = "okay";
+};
+
+/*
+ * Speakers: the same two CS35L41 amplifiers on spi_19 (HSI0 USI1) as Pixel 9,
+ * fed by the AoC's TDM_0 (zumapro-caimito-cs35l41.dtsi, aoc-sound card). The
+ * right amp is wired identically; the left amp's interrupt and reset differ
+ * (downstream zuma-shusky-audio.dtsi: INTB gpa5-2, RESET gpp1-1, plain GPIO,
+ * so no pinmux). The HSI0 USI1 clock gate, mux, divider and sysreg offsets
+ * match downstream zuma.
+ */
+&usi24 {
+	samsung,mode = <USI_MODE_SPI>;
+	status = "okay";
+};
+
+&cs35l41_l {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	interrupts = <2 IRQ_TYPE_LEVEL_LOW>;
+	reset-gpios = <&gpp1 1 GPIO_ACTIVE_HIGH>;
+	/* speaker protection: cirrus/cs35l41-dsp1-spk-prot-husky.{wmfw,bin} */
+	cirrus,subsystem-id = "husky";
+};
+
+&cs35l41_r {
+	/* ... and the right amp's tuning, cs35l41-dsp1-spk-prot-husky-r.bin */
+	cirrus,subsystem-id = "husky";
+};
+
+/ {
+	/* The AoC sensor hub (com.google.usf service), bridged to IIO. */
+	aoc_usf: aoc-usf {
+		compatible = "google,aoc-usf";
+		google,aoc = <&aoc>;
+	};
+};
+
+&pcie_0 {
+	status = "disabled";
+};
+
+&pcie_0_phy {
+	status = "disabled";
+};
+
+/*
+ * Wi-Fi/BT: BCM4398 on PCIe CH1 (HSI2 GEN3A_1, Gen3 x1). Pins from
+ * downstream zuma-board-wlan.dtsi / zuma-pcie.dtsi: PERST gph3-0, CLKREQ
+ * gph3-1, WLAN_EN gph3-4, WL_DEV_WAKE gph3-5, WL_HOST_WAKE gpa5-1 (Pixel 9
+ * uses gpa5-3). Clocks come from zuma's own HSI2 table (zuma.dtsi).
+ */
+&pcie_1_phy {
+	status = "okay";
+};
+
+&pcie_1 {
+	pinctrl-0 = <&pcie1_clkreq &pcie1_perst>;
+	pinctrl-names = "default";
+	reset-gpios = <&gph3 0 GPIO_ACTIVE_HIGH>;	/* PERST */
+	wlan-reg-on-gpios = <&gph3 4 GPIO_ACTIVE_HIGH>;	/* WLAN_EN */
+	host-wake-gpios = <&gpa5 1 GPIO_ACTIVE_HIGH>;	/* WL_HOST_WAKE */
+	device-wake-gpios = <&gph3 5 GPIO_ACTIVE_HIGH>;	/* WL_DEV_WAKE */
+	status = "okay";
+};
+
+/*
+ * Bluetooth half of the BCM4398. Its HCI UART lands on the AoC, not the AP:
+ * the vendor HAL talks to the AoC's btproxy (bt_vendor_overlay.conf:
+ * UserialTypePriority = 2-1, AocPowerPinCtrlCheckEnable on DVT and later), and
+ * the AoC exposes the same chre_bt_offload_* services as Pixel 9's, so the
+ * transport is hci_aoc (a module, loaded after the AoC). The AP owns only
+ * the power/wake pins, as downstream's nitrous node. The AP UART (APM_USI1,
+ * serial_18) stays off: the chip never answers HCI there.
+ */
+&usi18 {
+	samsung,clkreq-on; /* needed for UART mode */
+	status = "disabled";
+};
+
+&serial_18 {
+	status = "disabled";
+};
+
+/ {
+	bluetooth {
+		compatible = "google,aoc-bluetooth";
+		aoc = <&aoc>;
+		shutdown-gpios = <&gpn8 0 GPIO_ACTIVE_HIGH>;		/* BT_REG_ON */
+		device-wakeup-gpios = <&gpn9 0 GPIO_ACTIVE_HIGH>;	/* BT_DEV_WAKE */
+		/* bt-ble-dbo-le downstream: clocks BT_REG_ON into the chip */
+		reg-on-latch-gpios = <&gpp24 3 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+/*
+ * Platform node the bcmdhd driver finds by compatible (it is not the PCIe
+ * endpoint, which binds by PCI id under &pcie_1). WLAN_EN is driven by
+ * pci-exynos to bring the link up; bcmdhd re-requests it and tolerates the
+ * request failing. Same layout as zumapro-caimito-bcm4390.dtsi, with husky's
+ * host-wake line (gpa5-1) and PCI domain.
+ */
+/ {
+	wlan {
+		compatible = "android,bcmdhd_wlan";
+		wl_reg_on = <&gph3 4 GPIO_ACTIVE_HIGH>;		/* WLAN_EN */
+		wl_host_wake = <&gpa5 1 GPIO_ACTIVE_HIGH>;	/* WL_HOST_WAKE */
+		/* PCI domain of the endpoint (0000:01:00.0), not the HSI2
+		 * channel: dhd looks the endpoint up with pci_find_bus(ch-num, 1),
+		 * and pcie_1 is husky's only enabled controller, so domain 0. */
+		ch-num = <0>;
+		status = "okay";
+	};
+};
+
+/*
+ * ---------------------------------------------------------------------------
+ * Stage 2: PMICs, display pipeline, HK3 panel
+ * ---------------------------------------------------------------------------
+ *
+ * The s2mpg14 (main) and s2mpg15 (sub) PMICs sit behind ACPM, exactly as on
+ * zumapro (downstream zumapro-pmic.dtsi includes zuma/zuma-pmic.dtsi).  Only
+ * rails with a consumer here are described; everything else stays where the
+ * bootloader left it.  The panel wiring is verified against the bootloader
+ * DTB: reset gpa6-0, VCI = LDO14M, VDDI = BUCKA, VDDD = LDO22M, TE = gpp0-3.
+ */
+&acpm_ipc {
+	pmic-1 {
+		compatible = "samsung,s2mpg14-pmic";
+		interrupt-parent = <&vgpio2ap>;
+		interrupts = <0 IRQ_TYPE_LEVEL_HIGH>;
+		wakeup-source;
+
+		regulators {
+			m_ldo14_reg: ldo14m {
+				/* no voltage constraint: keep the bootloader's level */
+				regulator-name = "L14M_DISP_VCI";
+			};
+
+			m_ldo22_reg: ldo22m {
+				regulator-name = "L22M_DISP_VDDD";
+			};
+
+			m_ldo4_reg: ldo4m {
+				regulator-name = "L4M_TS_AVDD";
+			};
+
+			m_ldo25_reg: ldo25m {
+				regulator-name = "L25M_TSP_DVDD";
+			};
+		};
+	};
+
+	pmic-2 {
+		compatible = "samsung,s2mpg15-pmic";
+		interrupt-parent = <&vgpio2ap>;
+		interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
+		wakeup-source;
+
+		regulators {
+			s_bucka_reg: bucka {
+				regulator-name = "S2MPG15_BUCKA";
+				regulator-min-microvolt = <1700000>;
+				regulator-max-microvolt = <2100000>;
+				regulator-always-on;
+			};
+
+			s_ldo1_reg: ldo1s {
+				/*
+				 * L1S_VDD_G3D_M, the GPU SRAM rail; ACPM owns the
+				 * calibrated G3D core and L2 voltages.  No voltage
+				 * constraint: keep the bootloader's level.
+				 */
+				regulator-name = "L1S_VDD_G3D_M";
+				regulator-always-on;
+			};
+
+			/*
+			 * The AoC's sensor rails (downstream zuma-common.dtsi:
+			 * sensor_1v8 = LDO7S, sensor_3v3 = LDO5S).  Enable-only:
+			 * the bootloader's levels are what the sensors expect.
+			 */
+			s_ldo5_reg: ldo5s {
+				regulator-name = "L5S_PROX";
+				regulator-always-on;
+			};
+
+			s_ldo7_reg: ldo7s {
+				regulator-name = "L7S_SENSORS";
+				regulator-always-on;
+			};
+		};
+	};
+};
+
+/*
+ * panthor.  The bootloader leaves both G3D power domains on (zumapro.dtsi
+ * marks them always-on, as on Pixel 9).  Firmware: linux-firmware
+ * arm/mali/arch11.8/mali_csffw.bin, in the built-in initramfs.
+ */
+&gpu {
+	sram-supply = <&s_ldo1_reg>;
+	status = "okay";
+};
+
+/* The DRM pipeline replaces the bootloader splash and its auto-refresh. */
+&framebuffer0 {
+	status = "disabled";
+};
+
+&decon_autorefresh_bit {
+	status = "disabled";
+};
+
+&decon0 {
+	status = "okay";
+};
+
+&dpu_dma {
+	status = "okay";
+};
+
+&dpp0 {
+	status = "okay";
+};
+
+&dsim0 {
+	status = "okay";
+
+	panel0: panel@0 {
+		compatible = "google,hk3";
+		reg = <0>;
+		reset-gpios = <&gpa6 0 GPIO_ACTIVE_HIGH>;
+		vci-supply = <&m_ldo14_reg>;
+		vddi-supply = <&s_bucka_reg>;
+		vddd-supply = <&m_ldo22_reg>;
+
+		port {
+			panel0_in: endpoint {
+				remote-endpoint = <&dsim0_out>;
+			};
+		};
+	};
+
+	ports {
+		port@1 {
+			reg = <1>;
+			dsim0_out: endpoint {
+				remote-endpoint = <&panel0_in>;
+			};
+		};
+	};
+};
+
+/*
+ * Touch: ST FTM5 (D-chip 0x36 0x40) on SPI20, native chip select.  Verified
+ * against the bootloader DTB: spi@111d0000 with no pinctrl, IRQ gpn0-0,
+ * reset gpp21-2 (low = reset), DVDD = LDO25M, AVDD = LDO4M.
+ */
+&pinctrl_gpio_custom_alive {
+	ts_irq: ts-irq-pins {
+		samsung,pins = "gpn0-0";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
+	};
+};
+
+&usi20 {
+	samsung,mode = <USI_MODE_SPI>;
+	status = "okay";
+};
+
+&spi_20 {
+	num-cs = <1>;
+	status = "okay";
+
+	touchscreen@0 {
+		compatible = "st,ftm5-spi";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_irq>;
+		interrupts-extended = <&gpn0 0 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gpp21 2 GPIO_ACTIVE_LOW>;
+		vdd-supply = <&m_ldo25_reg>;
+		avdd-supply = <&m_ldo4_reg>;
+		touchscreen-size-x = <1344>;
+		touchscreen-size-y = <2992>;
+		/* tap to wake: gesture scan while this panel is powered down */
+		panel = <&panel0>;
+
+		controller-data {
+			samsung,spi-feedback-delay = <0>;
+			samsung,spi-chip-select-mode = <0>;
+			cs-clock-delay = <2>;
+		};
+	};
+};

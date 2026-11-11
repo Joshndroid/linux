@@ -6,6 +6,7 @@ dtb-$(CONFIG_ARCH_EXYNOS) += \
 	gs101-raven.dtb \
 	zumapro-tegu.dtb \
 	zumapro-tokay.dtb \
+	zuma-husky.dtb \
 	zumapro-caiman.dtb \
 	zumapro-comet.dtb \
 	zumapro-komodo.dtb
