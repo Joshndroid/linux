@@ -75,6 +75,7 @@ struct hwmgr_state_rsp {
 #define AOC_TZ_MSG_TIMEOUT_MS		10000
 #define AOC_TZ_BUF_TIMEOUT_MS		10000
 
+/* Default image; a board names its own with "firmware-name" (zuma: google/zuma/aoc.bin). */
 #define AOC_FIRMWARE_NAME	"google/zumapro/aoc.bin"
 
 /* A signed AOC image begins with a fixed-size authentication header (the cert
@@ -1454,6 +1455,7 @@ static int aoc_probe(struct platform_device *pdev)
 	struct reserved_mem *rmem;
 	struct device_node *np;
 	struct aoc_data *aoc;
+	const char *fw_name = AOC_FIRMWARE_NAME;
 	int ret;
 
 	aoc = devm_kzalloc(dev, sizeof(*aoc), GFP_KERNEL);
@@ -1546,12 +1548,13 @@ static int aoc_probe(struct platform_device *pdev)
 	/* Loaded as a module after the rootfs is up, so a plain synchronous
 	 * request is fine and reports the authentication result inline.
 	 */
-	ret = request_firmware(&fw, AOC_FIRMWARE_NAME, dev);
+	of_property_read_string(dev->of_node, "firmware-name", &fw_name);
+	ret = request_firmware(&fw, fw_name, dev);
 	if (ret) {
-		dev_err(dev, "cannot load %s: %d\n", AOC_FIRMWARE_NAME, ret);
+		dev_err(dev, "cannot load %s: %d\n", fw_name, ret);
 		goto err_put_gsa;
 	}
-	dev_info(dev, "loaded %s (%zu bytes)\n", AOC_FIRMWARE_NAME, fw->size);
+	dev_info(dev, "loaded %s (%zu bytes)\n", fw_name, fw->size);
 
 	/* Ask the power controller to keep the AOC on before we start it. */
 	aoc_request_on(aoc);
