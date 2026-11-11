@@ -1669,9 +1669,18 @@ static int exynos2200_usbdrd_phy_exit(struct phy *phy)
 	reg &= ~(EXYNOS2200_UTMI_FORCE_BVALID | EXYNOS2200_UTMI_FORCE_VBUSVALID);
 	writel(reg, regs_base + EXYNOS2200_DRD_UTMI);
 
-	reg = readl(regs_base + EXYNOS2200_DRD_CLKRST);
-	reg |= CLKRST_LINK_SW_RST;
-	writel(reg, regs_base + EXYNOS2200_DRD_CLKRST);
+	/*
+	 * Integrations with link_session_quirk pulse the link reset in
+	 * link_init() anyway. Leaving the link held in reset here would also
+	 * make the controller unreachable until the next phy_init(): dwc3
+	 * resume reads its PHY config registers before it calls phy_init(),
+	 * and that read never completes, hanging system resume.
+	 */
+	if (!phy_drd->drv_data->link_session_quirk) {
+		reg = readl(regs_base + EXYNOS2200_DRD_CLKRST);
+		reg |= CLKRST_LINK_SW_RST;
+		writel(reg, regs_base + EXYNOS2200_DRD_CLKRST);
+	}
 
 	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks, phy_drd->clks);
 
