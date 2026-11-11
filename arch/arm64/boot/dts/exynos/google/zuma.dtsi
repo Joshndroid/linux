@@ -1,0 +1,656 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Google Tensor G3 (zuma) SoC
+ *
+ * zuma and zumapro (Tensor G4) share their peripheral IP: in the downstream
+ * android-gs-shusky and android-gs-caimito trees the CMU tables
+ * (cal-if/zuma), the power-domain tables and all 775 shared interrupt numbers
+ * are identical, and every MMIO unit address in zumapro.dtsi that both
+ * downstream trees describe sits at the same address.  So this file starts
+ * from zumapro.dtsi and overrides only what differs:
+ *
+ *  - CPUs: 4x Cortex-A510 + 4x Cortex-A715 + 1x Cortex-X3 (nine cores,
+ *    MPIDR 0x000..0x800), one DSU cluster, against zumapro's 4+3+1.
+ *  - CPU OPP tables: downstream zuma reads them from the ECT at runtime;
+ *    here they are the ECT's levels, written out.
+ *  - TPU firmware carve-out at 0x93000000 (16 MiB), ABL at 0xf8800000.
+ *  - Chip-ID efuse compatible (product id 0x9865000, "ZUMA").
+ *
+ * Sources: kernel/devices/google/zuma android-gs-shusky-6.1-android16
+ * (zuma.dtsi, zuma-cpu.dtsi, zuma-rmem.dtsi, zuma-pcie.dtsi).
+ */
+
+#include "zumapro.dtsi"
+
+/ {
+	compatible = "google,zuma", "google,gs101";
+
+	cpus {
+		/delete-node/ cpu-map;
+
+		cpu-map {
+			cluster0 {
+				core0 { cpu = <&cpu0>; };
+				core1 { cpu = <&cpu1>; };
+				core2 { cpu = <&cpu2>; };
+				core3 { cpu = <&cpu3>; };
+				core4 { cpu = <&cpu4>; };
+				core5 { cpu = <&cpu5>; };
+				core6 { cpu = <&cpu6>; };
+				core7 { cpu = <&cpu7>; };
+				core8 { cpu = <&cpu8>; };
+			};
+		};
+
+		cpu8: cpu@800 {
+			#cooling-cells = <2>;
+			device_type = "cpu";
+			compatible = "arm,cortex-x3";
+			reg = <0x0800>;
+			enable-method = "psci";
+			cpu-idle-states = <&hunterelp_cpu_sleep>;
+			capacity-dmips-mhz = <1024>;
+			dynamic-power-coefficient = <757>;
+			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL2>;
+			operating-points-v2 = <&zuma_cpucl2_opp>;
+		};
+
+		/*
+		 * Idle-state parameters are the same in downstream zuma-cpu.dtsi
+		 * (KLEIN/MAKALU/MAKALUELP = 70/160/2000, 150/190/2500,
+		 * 235/220/3500 us), so zumapro's three states are reused as is.
+		 */
+	};
+
+	/delete-node/ opp-table-0;
+	/delete-node/ opp-table-1;
+	/delete-node/ opp-table-2;
+
+	/*
+	 * CPU operating points from husky's ECT (the bootloader's table at
+	 * 0x90000000; `luma/husky/tools/ect-decode.py ect.bin --opp` writes these): every
+	 * DVFS level of CPUCL0/1/2 inside downstream zuma-cpu.dtsi's exynos-acme
+	 * limits (324-1704, 402-2367, 500-2914 MHz).  ACPM applies the fused,
+	 * ASV-calibrated voltages itself; opp-microvolt only feeds the Energy
+	 * Model.  It is the voltage ACPM applied on one husky (its fvmap in APM
+	 * SRAM, `luma/husky/tools/fvmap-decode.py --opp`): 30-50 mV below ECT
+	 * ASV table 2 group 4, which these tables first used.  No single ECT
+	 * group matches (ACPM adds fused margins); other chips differ by a few
+	 * steps, which the Energy Model tolerates.
+	 */
+	zuma_cpucl0_opp: opp-table-cpucl0 {
+		compatible = "operating-points-v2";
+		opp-shared;
+
+		opp-324000000 {
+			opp-hz = /bits/ 64 <324000000>;
+			opp-microvolt = <531250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-610000000 {
+			opp-hz = /bits/ 64 <610000000>;
+			opp-microvolt = <543750>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-820000000 {
+			opp-hz = /bits/ 64 <820000000>;
+			opp-microvolt = <587500>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-955000000 {
+			opp-hz = /bits/ 64 <955000000>;
+			opp-microvolt = <618750>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1098000000 {
+			opp-hz = /bits/ 64 <1098000000>;
+			opp-microvolt = <650000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1197000000 {
+			opp-hz = /bits/ 64 <1197000000>;
+			opp-microvolt = <668750>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1328000000 {
+			opp-hz = /bits/ 64 <1328000000>;
+			opp-microvolt = <700000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1425000000 {
+			opp-hz = /bits/ 64 <1425000000>;
+			opp-microvolt = <737500>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1548000000 {
+			opp-hz = /bits/ 64 <1548000000>;
+			opp-microvolt = <775000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1704000000 {
+			opp-hz = /bits/ 64 <1704000000>;
+			opp-microvolt = <818750>;
+			clock-latency-ns = <500000>;
+		};
+	};
+
+	zuma_cpucl1_opp: opp-table-cpucl1 {
+		compatible = "operating-points-v2";
+		opp-shared;
+
+		opp-402000000 {
+			opp-hz = /bits/ 64 <402000000>;
+			opp-microvolt = <531250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-578000000 {
+			opp-hz = /bits/ 64 <578000000>;
+			opp-microvolt = <537500>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-697000000 {
+			opp-hz = /bits/ 64 <697000000>;
+			opp-microvolt = <550000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-712000000 {
+			opp-hz = /bits/ 64 <712000000>;
+			opp-microvolt = <556250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-910000000 {
+			opp-hz = /bits/ 64 <910000000>;
+			opp-microvolt = <593750>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1065000000 {
+			opp-hz = /bits/ 64 <1065000000>;
+			opp-microvolt = <618750>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1221000000 {
+			opp-hz = /bits/ 64 <1221000000>;
+			opp-microvolt = <650000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1328000000 {
+			opp-hz = /bits/ 64 <1328000000>;
+			opp-microvolt = <681250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1418000000 {
+			opp-hz = /bits/ 64 <1418000000>;
+			opp-microvolt = <700000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1572000000 {
+			opp-hz = /bits/ 64 <1572000000>;
+			opp-microvolt = <750000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1836000000 {
+			opp-hz = /bits/ 64 <1836000000>;
+			opp-microvolt = <831250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1945000000 {
+			opp-hz = /bits/ 64 <1945000000>;
+			opp-microvolt = <881250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2130000000 {
+			opp-hz = /bits/ 64 <2130000000>;
+			opp-microvolt = <956250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2245000000 {
+			opp-hz = /bits/ 64 <2245000000>;
+			opp-microvolt = <1025000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2367000000 {
+			opp-hz = /bits/ 64 <2367000000>;
+			opp-microvolt = <1093750>;
+			clock-latency-ns = <500000>;
+		};
+	};
+
+	zuma_cpucl2_opp: opp-table-cpucl2 {
+		compatible = "operating-points-v2";
+		opp-shared;
+
+		opp-500000000 {
+			opp-hz = /bits/ 64 <500000000>;
+			opp-microvolt = <512500>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-880000000 {
+			opp-hz = /bits/ 64 <880000000>;
+			opp-microvolt = <562500>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1164000000 {
+			opp-hz = /bits/ 64 <1164000000>;
+			opp-microvolt = <606250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1298000000 {
+			opp-hz = /bits/ 64 <1298000000>;
+			opp-microvolt = <618750>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1557000000 {
+			opp-hz = /bits/ 64 <1557000000>;
+			opp-microvolt = <668750>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1745000000 {
+			opp-hz = /bits/ 64 <1745000000>;
+			opp-microvolt = <706250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-1885000000 {
+			opp-hz = /bits/ 64 <1885000000>;
+			opp-microvolt = <750000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2049000000 {
+			opp-hz = /bits/ 64 <2049000000>;
+			opp-microvolt = <787500>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2147000000 {
+			opp-hz = /bits/ 64 <2147000000>;
+			opp-microvolt = <812500>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2294000000 {
+			opp-hz = /bits/ 64 <2294000000>;
+			opp-microvolt = <850000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2363000000 {
+			opp-hz = /bits/ 64 <2363000000>;
+			opp-microvolt = <868750>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2556000000 {
+			opp-hz = /bits/ 64 <2556000000>;
+			opp-microvolt = <937500>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2687000000 {
+			opp-hz = /bits/ 64 <2687000000>;
+			opp-microvolt = <1000000>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2850000000 {
+			opp-hz = /bits/ 64 <2850000000>;
+			opp-microvolt = <1081250>;
+			clock-latency-ns = <500000>;
+		};
+
+		opp-2914000000 {
+			opp-hz = /bits/ 64 <2914000000>;
+			opp-microvolt = <1137500>;
+			clock-latency-ns = <500000>;
+		};
+	};
+
+	pmu-0 {
+		compatible = "arm,cortex-a510-pmu";
+	};
+
+	pmu-1 {
+		compatible = "arm,cortex-a715-pmu";
+	};
+
+	pmu-2 {
+		compatible = "arm,cortex-x3-pmu";
+	};
+
+	pmu-3 {
+		cpus = <&cpu0>, <&cpu1>, <&cpu2>, <&cpu3>,
+		       <&cpu4>, <&cpu5>, <&cpu6>, <&cpu7>, <&cpu8>;
+	};
+
+	timer {
+		interrupts =
+		   <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(9) | IRQ_TYPE_LEVEL_LOW) 0>,
+		   <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(9) | IRQ_TYPE_LEVEL_LOW) 0>,
+		   <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(9) | IRQ_TYPE_LEVEL_LOW) 0>,
+		   <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(9) | IRQ_TYPE_LEVEL_LOW) 0>,
+		   <GIC_PPI 12 (GIC_CPU_MASK_SIMPLE(9) | IRQ_TYPE_LEVEL_LOW) 0>;
+	};
+
+	reserved-memory {
+		/delete-node/ tpu_fw@92e00000;
+
+		tpu_fw_reserved: tpu_fw@93000000 {
+			reg = <0x0 0x93000000 0x01000000>;
+			no-map;
+		};
+
+		abl_reserved: abl@f8800000 {
+			reg = <0x0 0xf8800000 0x01000000>;
+			no-map;
+		};
+	};
+};
+
+/* zumapro's CPU nodes, retyped for zuma, on zuma's OPP tables. */
+&cpu0 {
+	compatible = "arm,cortex-a510";
+	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
+	operating-points-v2 = <&zuma_cpucl0_opp>;
+	capacity-dmips-mhz = <193>;
+	dynamic-power-coefficient = <70>;
+};
+
+&cpu1 {
+	compatible = "arm,cortex-a510";
+	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
+	operating-points-v2 = <&zuma_cpucl0_opp>;
+	capacity-dmips-mhz = <193>;
+	dynamic-power-coefficient = <70>;
+};
+
+&cpu2 {
+	compatible = "arm,cortex-a510";
+	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
+	operating-points-v2 = <&zuma_cpucl0_opp>;
+	capacity-dmips-mhz = <193>;
+	dynamic-power-coefficient = <70>;
+};
+
+&cpu3 {
+	compatible = "arm,cortex-a510";
+	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
+	operating-points-v2 = <&zuma_cpucl0_opp>;
+	capacity-dmips-mhz = <193>;
+	dynamic-power-coefficient = <70>;
+};
+
+&cpu4 {
+	compatible = "arm,cortex-a715";
+	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
+	operating-points-v2 = <&zuma_cpucl1_opp>;
+	capacity-dmips-mhz = <927>;
+	dynamic-power-coefficient = <513>;
+};
+
+&cpu5 {
+	compatible = "arm,cortex-a715";
+	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
+	operating-points-v2 = <&zuma_cpucl1_opp>;
+	capacity-dmips-mhz = <927>;
+	dynamic-power-coefficient = <513>;
+};
+
+&cpu6 {
+	compatible = "arm,cortex-a715";
+	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
+	operating-points-v2 = <&zuma_cpucl1_opp>;
+	cpu-idle-states = <&hunter_cpu_sleep>;
+	capacity-dmips-mhz = <927>;
+	dynamic-power-coefficient = <513>;
+};
+
+/* zumapro's cpu7 is its X4; on zuma it is the fourth A715. */
+&cpu7 {
+	compatible = "arm,cortex-a715";
+	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
+	operating-points-v2 = <&zuma_cpucl1_opp>;
+	/delete-property/ #cooling-cells;
+	cpu-idle-states = <&hunter_cpu_sleep>;
+	capacity-dmips-mhz = <927>;
+	dynamic-power-coefficient = <513>;
+};
+
+/* PPI partitions follow the core types: A510 / A715 / X3. */
+&ppi_cluster0 {
+	affinity = <&cpu0 &cpu1 &cpu2 &cpu3>;
+};
+
+&ppi_cluster1 {
+	affinity = <&cpu4 &cpu5 &cpu6 &cpu7>;
+};
+
+&ppi_cluster2 {
+	affinity = <&cpu8>;
+};
+
+/* Nine redistributors; downstream zuma sizes GICR at 0x200000. */
+&gic {
+	reg = <0x10400000 0x10000>,
+	      <0x10440000 0x200000>;
+};
+
+/*
+ * The big-cluster thermal zone cools the X3 (cpu8).  mid/little keep their
+ * zumapro targets, cpu4 and cpu0, which are still the first core of each type.
+ */
+&{/thermal-zones/big-thermal/cooling-maps/map0} {
+	cooling-device = <&cpu8 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+};
+
+/*
+ * zumapro's 1000 mW LITTLE budget is a measured A520 figure; zuma's four
+ * A510s top out near 400 mW in their energy model, so the zone never acted
+ * and sat at 71-72 C under all-core load.  Downstream zuma gives LITTLE
+ * 200 mW; with it the zone holds 68-69 C (1.2-1.3 GHz) while big/mid keep
+ * their 70 C target (tested live via sustainable_power, 3 min, 9 threads).
+ */
+&{/thermal-zones/little-thermal} {
+	sustainable-power = <200>;
+};
+
+/*
+ * zumapro's 1200 mW big budget is its X4's.  With the single-trip
+ * (always-on) IPA the budget applies even on a cool die: one busy X3 got
+ * ~1.6 W and sat at 2147-2294 MHz at 60 C, 10 C under the trip -- not a
+ * firmware cap, as first suspected.  Downstream zuma gives BIG 2000 mW;
+ * with it the X3 runs 2556 MHz and settles at 68-69 C, so the 70 C target
+ * still holds and only the headroom below it is used (tested live,
+ * 15 s single-thread load from a cool start).
+ */
+&{/thermal-zones/big-thermal} {
+	sustainable-power = <2000>;
+};
+
+/*
+ * MID: zumapro's 1500 mW is its A720s'. Four busy A715s were held at
+ * 1418-1572 MHz at 61 C (1.35 W on S3M VDD_CPUCL1), 9 C under the trip.
+ * With 2500 they burst at 1836 MHz and settle at 1572 MHz, 67-68 C,
+ * 1.75 W (tested live, 90 s mid-only load from a cool start).
+ */
+&{/thermal-zones/mid-thermal} {
+	sustainable-power = <2500>;
+};
+
+/*
+ * G3D: the budget is the measured full-tilt figure, as zumapro sets it,
+ * now in the measured opp-microwatt units above: a 2 min saturating load
+ * holds 890 MHz at 61 C (1.27 W), so the zone stays a safety net.
+ */
+&{/thermal-zones/g3d-thermal} {
+	sustainable-power = <1300>;
+};
+
+/*
+ * mct_v3 needs no change: its driver gives CPU n comparator n and interrupt
+ * n, and zumapro.dtsi already lists IRQ_MCT_L0..L8 -- one per zuma core,
+ * matching downstream zuma.dtsi's mct_v3_map exactly.  pcie_0's outbound
+ * window (PCI 0x14e00000) is likewise already zuma's.
+ */
+
+&{/soc@0/efuse@10000000} {
+	compatible = "google,zuma-otp";
+};
+
+/* Secure PMU access only; see zuma_pmu_data in drivers/soc/samsung/gs101-pmu.c. */
+&pmu_system_controller {
+	compatible = "google,zuma-pmu", "google,gs101-pmu";
+};
+
+/*
+ * The bootloader leaves the AP cluster watchdogs running (the phone resets
+ * ~80 s into a Linux boot). zuma's PMU CNT_EN bit/CL1 offsets differ from
+ * gs101, hence the separate compatible. With tmr_atboot=0 the driver stops
+ * the bootloader's countdown at probe.
+ */
+&watchdog_cl0 {
+	compatible = "google,zuma-wdt";
+	status = "okay";
+};
+
+&watchdog_cl1 {
+	compatible = "google,zuma-wdt";
+	status = "okay";
+};
+
+/*
+ * Mali-G715 MC7, the same GPU as zumapro: downstream zumapro-gpu.dtsi is
+ * zuma-gpu.dtsi plus a higher clock cap (same registers, interrupts, power
+ * domains, ACPM DVFS ids and L2 hash).  zuma's cap is 890 MHz
+ * (gpu_dvfs_max_freq), so drop zumapro's 940 MHz top point.  The other OPP
+ * rows are the downstream zuma v2 table's; their opp-microwatt figures were
+ * measured on zumapro and stand in until husky is measured.
+ */
+/*
+ * opp-microwatt measured on husky: mean S2S VDD_G3D (s2mpg15 meter) with
+ * the GPU saturated by a 1024x1024 ALU-bound fragment shader pinned at
+ * each rung (frames scaled linearly with clock), rounded to 10 mW. They
+ * run 1.4-2.1x zumapro's glmark2 figures, which its own note calls
+ * understated; the G3D_L2 rail (~40 mW) is still not included.
+ */
+&gpu_opp_table {
+	/delete-node/ opp-940000000;
+
+	opp-150000000 {
+		opp-microwatt = <200000>;
+	};
+
+	opp-302000000 {
+		opp-microwatt = <300000>;
+	};
+
+	opp-337000000 {
+		opp-microwatt = <350000>;
+	};
+
+	opp-376000000 {
+		opp-microwatt = <400000>;
+	};
+
+	opp-419000000 {
+		opp-microwatt = <440000>;
+	};
+
+	opp-467000000 {
+		opp-microwatt = <520000>;
+	};
+
+	opp-521000000 {
+		opp-microwatt = <580000>;
+	};
+
+	opp-580000000 {
+		opp-microwatt = <650000>;
+	};
+
+	opp-649000000 {
+		opp-microwatt = <750000>;
+	};
+
+	opp-723000000 {
+		opp-microwatt = <880000>;
+	};
+
+	opp-807000000 {
+		opp-microwatt = <1110000>;
+	};
+
+	opp-850000000 {
+		opp-microwatt = <1180000>;
+	};
+
+	opp-890000000 {
+		opp-microwatt = <1300000>;
+	};
+};
+
+/*
+ * HSI2 carries a PCIe GEN3A_1 x1 controller on zuma (GEN4_1 on zumapro), so
+ * its PCIe gates sit at different offsets; zumapro's land on other zuma
+ * gates (0x2008 is GPIO_HSI2UFS). The zuma table keeps only the zumapro
+ * entries downstream confirms identical (UFS, sysreg, GPIO, ...) and adds
+ * the GEN3A_1 gates.
+ */
+&cmu_hsi2 {
+	compatible = "google,zuma-g3-cmu-hsi2";
+};
+
+/* HSI2 GEN3A_1 (Wi-Fi): zuma's own gates, see cmu_hsi2 above. */
+&pcie_1 {
+	clocks = <&cmu_hsi2 CLK_GOUT_HSI2_PCIE_GEN3A_1_DBI_ACLK>,
+		 <&cmu_hsi2 CLK_GOUT_HSI2_PCIE_GEN3A_1_MSTR_ACLK>,
+		 <&cmu_hsi2 CLK_GOUT_HSI2_PCIE_GEN3A_1_SLV_ACLK>,
+		 <&cmu_hsi2 CLK_GOUT_HSI2_PCIE_GEN3A_1_DRIVER_APB_CLK>,
+		 <&cmu_hsi2 CLK_GOUT_HSI2_PCIE_GEN3A_1_PHY_UDBG_APB_PCLK>,
+		 <&cmu_hsi2 CLK_GOUT_HSI2_PCIE_GEN3A_1_PIPE_PAL_APB_PCLK>,
+		 <&cmu_hsi2 CLK_GOUT_HSI2_PCIE_GEN3A_1_PHY_QCH_APB_PCLK>,
+		 <&cmu_hsi2 CLK_GOUT_HSI2_PCIE_GEN3A_1_PHY_REFCLK_IN>;
+};
+
+/*
+ * Zuma's APM CMU places the APM_USI1 UART gates (serial_18, the Bluetooth
+ * UART) differently from zumapro; see "google,zuma-g3-cmu-apm" in clk-zuma.c.
+ */
+&cmu_apm {
+	compatible = "google,zuma-g3-cmu-apm";
+};
+
+/*
+ * On zuma all four APM_USI1 pins reach the UART (RXD, TXD, nCTS, nRTS); on
+ * zumapro gpa3-2/3 are SPMI, which is why zumapro-pinctrl lists only two.
+ */
+&uart18_bus {
+	samsung,pins = "gpa3-0", "gpa3-1", "gpa3-2", "gpa3-3";
+};
