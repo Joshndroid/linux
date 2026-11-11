@@ -1684,6 +1684,15 @@ static int exynos2200_usbdrd_phy_exit(struct phy *phy)
 
 	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks, phy_drd->clks);
 
+	/*
+	 * Balance the phy_init() of the high-speed PHY in the UTMI init. The
+	 * isolation below powers it down, so without this the next phy_init()
+	 * (e.g. on resume) only bumps its init count, leaves it unconfigured,
+	 * and the controller gets no UTMI clock.
+	 */
+	if (inst->phy_cfg->id == EXYNOS5_DRDPHY_UTMI)
+		phy_exit(phy_drd->hs_phy);
+
 	inst->phy_cfg->phy_isol(inst, true);
 	return regulator_bulk_disable(phy_drd->drv_data->n_regulators,
 				      phy_drd->regulators);
