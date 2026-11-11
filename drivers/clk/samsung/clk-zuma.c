@@ -23,6 +23,7 @@
 #define CLKS_NR_HSI0	(CLK_DOUT_HSI0_USB + 1)
 #define CLKS_NR_HSI1	(CLK_GOUT_HSI1_PCIE_GEN3_0_PIPE_PAL_APB_PCLK + 1)
 #define CLKS_NR_HSI2	(CLK_GOUT_HSI2_XIU_P_HSI2_ACLK + 1)
+#define CLKS_NR_ZUMA_G3_HSI2	(CLK_GOUT_HSI2_PCIE_IA_GEN3A_1_I_CLK + 1)
 #define CLKS_NR_MISC	(CLK_GOUT_MISC_XIU_D_MISC_ACLK + 1)
 #define CLKS_NR_PERIC0	(CLK_GOUT_PERIC0_SYSREG_PERIC0_PCLK + 1)
 #define CLKS_NR_PERIC1	(CLK_GOUT_PERIC1_SYSREG_PERIC1_PCLK + 1)
@@ -2678,6 +2679,24 @@ static const struct samsung_gate_clock hsi2_gate_clks[] __initconst = {
 	     21, CLK_IGNORE_UNUSED, 0),
 };
 
+
+/*
+ * zuma (Tensor G3, Pixel 8 Pro) HSI2: the same CMU with one PCIe GEN3A_1 x1
+ * controller where zumapro has GEN4_1, so its PCIe gates sit elsewhere
+ * (downstream zuma cmucal-sfr.c). zumapro's PCIe offsets land on other
+ * zuma gates -- 0x2008 is GPIO_HSI2UFS -- so zuma must never be given the
+ * zumapro gate list.
+ */
+#define ZUMA_G3_HSI2_PCIE_GEN3A_1_PHY_REFCLK_IN             0x201c
+#define ZUMA_G3_HSI2_PCIE_GEN3A_1_DBI_ACLK                  0x2088
+#define ZUMA_G3_HSI2_PCIE_GEN3A_1_MSTR_ACLK                 0x208c
+#define ZUMA_G3_HSI2_PCIE_GEN3A_1_SLV_ACLK                  0x2090
+#define ZUMA_G3_HSI2_PCIE_GEN3A_1_DRIVER_APB_CLK            0x2094
+#define ZUMA_G3_HSI2_PCIE_GEN3A_1_PHY_UDBG_APB_PCLK         0x2098
+#define ZUMA_G3_HSI2_PCIE_GEN3A_1_PIPE_PAL_APB_PCLK         0x209c
+#define ZUMA_G3_HSI2_PCIE_GEN3A_1_PHY_QCH_APB_PCLK          0x2020
+#define ZUMA_G3_HSI2_PCIE_IA_GEN3A_1_I_CLK                  0x20a4
+
 static const struct samsung_cmu_info hsi2_cmu_info __initconst = {
 	.mux_clks		= hsi2_mux_clks,
 	.nr_mux_clks		= ARRAY_SIZE(hsi2_mux_clks),
@@ -2699,6 +2718,126 @@ static const struct samsung_cmu_info hsi2_cmu_info __initconst = {
 	.drcg_offset		= GS101_DRCG_EN_OFFSET,
 	.memclk_offset		= GS101_MEMCLK_OFFSET,
 };
+/* zumapro entries whose registers downstream zuma confirms identical. */
+static const struct samsung_gate_clock zuma_g3_hsi2_gate_clks[] __initconst = {
+	GATE(CLK_GOUT_HSI2_D_TZPC_HSI2_PCLK,
+	     "gout_hsi2_d_tzpc_hsi2_pclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_D_TZPC_HSI2_IPCLKPORT_PCLK,
+	     21, 0, 0),
+	GATE(CLK_GOUT_HSI2_GPC_HSI2_PCLK,
+	     "gout_hsi2_gpc_hsi2_pclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_GPC_HSI2_IPCLKPORT_PCLK, 21, 0, 0),
+	GATE(CLK_GOUT_HSI2_GPIO_HSI2_PCLK,
+	     "gout_hsi2_gpio_hsi2_pclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_GPIO_HSI2_IPCLKPORT_PCLK, 21,
+	     CLK_IGNORE_UNUSED, 0),
+	/* Disabling this clock makes the system hang. Mark the clock as critical. */
+	GATE(CLK_GOUT_HSI2_HSI2_CMU_HSI2_PCLK,
+	     "gout_hsi2_hsi2_cmu_hsi2_pclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_HSI2_CMU_HSI2_IPCLKPORT_PCLK,
+	     21, CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_HSI2_MMC_CARD_I_ACLK,
+	     "gout_hsi2_mmc_card_i_aclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_MMC_CARD_IPCLKPORT_I_ACLK,
+	     21, 0, 0),
+	GATE(CLK_GOUT_HSI2_MMC_CARD_SDCLKIN,
+	     "gout_hsi2_mmc_card_sdclkin", "mout_hsi2_mmc_card_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_MMC_CARD_IPCLKPORT_SDCLKIN,
+	     21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PPMU_HSI2_ACLK,
+	     "gout_hsi2_ppmu_hsi2_aclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_PPMU_HSI2_IPCLKPORT_ACLK,
+	     21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PPMU_HSI2_PCLK,
+	     "gout_hsi2_ppmu_hsi2_pclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_PPMU_HSI2_IPCLKPORT_PCLK,
+	     21, 0, 0),
+	GATE(CLK_GOUT_HSI2_QE_MMC_CARD_HSI2_ACLK,
+	     "gout_hsi2_qe_mmc_card_hsi2_aclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_QE_MMC_CARD_HSI2_IPCLKPORT_ACLK,
+	     21, 0, 0),
+	GATE(CLK_GOUT_HSI2_QE_MMC_CARD_HSI2_PCLK,
+	     "gout_hsi2_qe_mmc_card_hsi2_pclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_QE_MMC_CARD_HSI2_IPCLKPORT_PCLK,
+	     21, 0, 0),
+	GATE(CLK_GOUT_HSI2_QE_UFS_EMBD_HSI2_ACLK,
+	     "gout_hsi2_qe_ufs_embd_hsi2_aclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_ACLK,
+	     21, CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_HSI2_QE_UFS_EMBD_HSI2_PCLK,
+	     "gout_hsi2_qe_ufs_embd_hsi2_pclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_PCLK,
+	     21, CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_HSI2_CLK_HSI2_OSCCLK_CLK,
+	     "gout_hsi2_clk_hsi2_oscclk_clk", "oscclk",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_RSTNSYNC_CLK_HSI2_OSCCLK_IPCLKPORT_CLK,
+	     21, 0, 0),
+	GATE(CLK_GOUT_HSI2_SSMT_HSI2_ACLK,
+	     "gout_hsi2_ssmt_hsi2_aclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_SSMT_HSI2_IPCLKPORT_ACLK,
+	     21, CLK_IGNORE_UNUSED, 0),
+	GATE(CLK_GOUT_HSI2_SSMT_HSI2_PCLK,
+	     "gout_hsi2_ssmt_hsi2_pclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_SSMT_HSI2_IPCLKPORT_PCLK,
+	     21, CLK_IGNORE_UNUSED, 0),
+	GATE(CLK_GOUT_HSI2_SYSREG_HSI2_PCLK,
+	     "gout_hsi2_sysreg_hsi2_pclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_SYSREG_HSI2_IPCLKPORT_PCLK,
+	     21, CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_HSI2_UFS_EMBD_I_ACLK,
+	     "gout_hsi2_ufs_embd_i_aclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_ACLK,
+	     21, CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_HSI2_UFS_EMBD_I_CLK_UNIPRO,
+	     "gout_hsi2_ufs_embd_i_clk_unipro", "mout_hsi2_ufs_embd_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_CLK_UNIPRO,
+	     21, CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_HSI2_UFS_EMBD_I_FMP_CLK,
+	     "gout_hsi2_ufs_embd_i_fmp_clk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_FMP_CLK,
+	     21, CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_HSI2_XIU_P_HSI2_ACLK,
+	     "gout_hsi2_xiu_p_hsi2_aclk", "mout_hsi2_bus_user",
+	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_XIU_P_HSI2_IPCLKPORT_ACLK,
+	     21, CLK_IGNORE_UNUSED, 0),
+	GATE(CLK_GOUT_HSI2_PCIE_GEN3A_1_PHY_REFCLK_IN,
+	     "gout_hsi2_pcie_gen3a_1_phy_refclk_in", "mout_hsi2_pcie_user",
+	     ZUMA_G3_HSI2_PCIE_GEN3A_1_PHY_REFCLK_IN, 21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PCIE_GEN3A_1_DBI_ACLK,
+	     "gout_hsi2_pcie_gen3a_1_dbi_aclk", "mout_hsi2_bus_user",
+	     ZUMA_G3_HSI2_PCIE_GEN3A_1_DBI_ACLK, 21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PCIE_GEN3A_1_MSTR_ACLK,
+	     "gout_hsi2_pcie_gen3a_1_mstr_aclk", "mout_hsi2_bus_user",
+	     ZUMA_G3_HSI2_PCIE_GEN3A_1_MSTR_ACLK, 21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PCIE_GEN3A_1_SLV_ACLK,
+	     "gout_hsi2_pcie_gen3a_1_slv_aclk", "mout_hsi2_bus_user",
+	     ZUMA_G3_HSI2_PCIE_GEN3A_1_SLV_ACLK, 21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PCIE_GEN3A_1_DRIVER_APB_CLK,
+	     "gout_hsi2_pcie_gen3a_1_driver_apb_clk", "mout_hsi2_bus_user",
+	     ZUMA_G3_HSI2_PCIE_GEN3A_1_DRIVER_APB_CLK, 21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PCIE_GEN3A_1_PHY_UDBG_APB_PCLK,
+	     "gout_hsi2_pcie_gen3a_1_phy_udbg_apb_pclk", "mout_hsi2_bus_user",
+	     ZUMA_G3_HSI2_PCIE_GEN3A_1_PHY_UDBG_APB_PCLK, 21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PCIE_GEN3A_1_PIPE_PAL_APB_PCLK,
+	     "gout_hsi2_pcie_gen3a_1_pipe_pal_apb_pclk", "mout_hsi2_bus_user",
+	     ZUMA_G3_HSI2_PCIE_GEN3A_1_PIPE_PAL_APB_PCLK, 21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PCIE_GEN3A_1_PHY_QCH_APB_PCLK,
+	     "gout_hsi2_pcie_gen3a_1_phy_qch_apb_pclk", "mout_hsi2_bus_user",
+	     ZUMA_G3_HSI2_PCIE_GEN3A_1_PHY_QCH_APB_PCLK, 21, 0, 0),
+	GATE(CLK_GOUT_HSI2_PCIE_IA_GEN3A_1_I_CLK,
+	     "gout_hsi2_pcie_ia_gen3a_1_i_clk", "mout_hsi2_bus_user",
+	     ZUMA_G3_HSI2_PCIE_IA_GEN3A_1_I_CLK, 21, 0, 0),
+};
+
+static const struct samsung_cmu_info zuma_g3_hsi2_cmu_info __initconst = {
+	.mux_clks		= hsi2_mux_clks,
+	.nr_mux_clks		= ARRAY_SIZE(hsi2_mux_clks),
+	.gate_clks		= zuma_g3_hsi2_gate_clks,
+	.nr_gate_clks		= ARRAY_SIZE(zuma_g3_hsi2_gate_clks),
+	.nr_clk_ids		= CLKS_NR_ZUMA_G3_HSI2,
+	.clk_name		= "bus",
+};
+
 
 /* ---- CMU_HSI1 ------------------------------------------------------------ */
 
@@ -4147,8 +4286,43 @@ static const struct samsung_cmu_info mfc_cmu_info __initconst = {
 	.memclk_offset		= GS101_MEMCLK_OFFSET,
 };
 
+/*
+ * Zuma (Tensor G3) APM: the same table, except that APM_USI1_UART_INT (the
+ * Bluetooth UART, serial_18) sits at 0x20f4/0x20f8 with its reset-sync gate at
+ * 0x2148 (downstream zuma cmucal-sfr.c). On zuma, the 0x2038/0x203c/0x20a4
+ * offsets the shared table uses for these clocks are internal LH bus gates
+ * (scan2dram, CPUCL0 alive), which the UART driver must never turn off.
+ */
+#define ZUMA_G3_APM_USI1_UART_INT_IPCLK		0x20f4
+#define ZUMA_G3_APM_USI1_UART_INT_PCLK		0x20f8
+#define ZUMA_G3_APM_RSTNSYNC_SR_USI1_UART_INT_CLK	0x2148
+
+static struct samsung_gate_clock zuma_g3_apm_gate_clks[ARRAY_SIZE(apm_gate_clks)] __initdata;
+static struct samsung_cmu_info zuma_g3_apm_cmu_info __initdata;
+
+static void __init zuma_g3_apm_build(void)
+{
+	int i;
+
+	memcpy(zuma_g3_apm_gate_clks, apm_gate_clks, sizeof(apm_gate_clks));
+	for (i = 0; i < ARRAY_SIZE(zuma_g3_apm_gate_clks); i++) {
+		struct samsung_gate_clock *g = &zuma_g3_apm_gate_clks[i];
+
+		if (g->id == CLK_GOUT_APM_APM_USI1_UART_IPCLK)
+			g->offset = ZUMA_G3_APM_USI1_UART_INT_IPCLK;
+		else if (g->id == CLK_GOUT_APM_APM_USI1_UART_PCLK)
+			g->offset = ZUMA_G3_APM_USI1_UART_INT_PCLK;
+		else if (g->id == CLK_GOUT_APM_CLK_APM_USI1_UART_CLK)
+			g->offset = ZUMA_G3_APM_RSTNSYNC_SR_USI1_UART_INT_CLK;
+	}
+	zuma_g3_apm_cmu_info = apm_cmu_info;
+	zuma_g3_apm_cmu_info.gate_clks = zuma_g3_apm_gate_clks;
+}
+
 static int __init zuma_cmu_probe(struct platform_device *pdev)
 {
+	if (of_device_is_compatible(pdev->dev.of_node, "google,zuma-g3-cmu-apm"))
+		zuma_g3_apm_build();
 	return exynos_arm64_register_cmu_pm(pdev, true);
 }
 
@@ -4156,6 +4330,10 @@ static const struct of_device_id zuma_cmu_of_match[] = {
 	{
 		.compatible = "google,zuma-cmu-apm",
 		.data = &apm_cmu_info,
+	}, {
+		/* filled in by zuma_g3_apm_build() before registration */
+		.compatible = "google,zuma-g3-cmu-apm",
+		.data = &zuma_g3_apm_cmu_info,
 	}, {
 		.compatible = "google,zuma-cmu-dpu",
 		.data = &dpu_cmu_info,
@@ -4177,6 +4355,9 @@ static const struct of_device_id zuma_cmu_of_match[] = {
 	}, {
 		.compatible = "google,zumapro-cmu-hsi2",
 		.data = &hsi2_cmu_info,
+	}, {
+		.compatible = "google,zuma-g3-cmu-hsi2",
+		.data = &zuma_g3_hsi2_cmu_info,
 	}, {
 		.compatible = "google,zuma-cmu-peric0",
 		.data = &peric0_cmu_info,
