@@ -808,7 +808,12 @@ static int aoc_bt_probe(struct platform_device *pdev)
 	/* Every close cuts power, and with it the patchram. */
 	hci_set_quirk(hdev, HCI_QUIRK_NON_PERSISTENT_SETUP);
 	hdev->set_bdaddr = btbcm_set_bdaddr;
-	if (of_machine_is_compatible("google,tokay"))
+	/*
+	 * The provisioned address, when the boot code imported one into
+	 * local-bd-address (tokay, husky); without it the chip keeps its
+	 * built-in default (43:98:D0:... on BCM4398D0, shared by every unit).
+	 */
+	if (of_property_present(dev->of_node, "local-bd-address"))
 		hci_set_quirk(hdev, HCI_QUIRK_USE_BDADDR_PROPERTY);
 
 	platform_set_drvdata(pdev, bt);
