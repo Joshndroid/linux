@@ -349,13 +349,16 @@ const struct exynos_pmu_data zumapro_pmu_data = {
 };
 
 /*
- * Zuma (Tensor G3) has the same EL3-protected PMU_ALIVE.  Only secure
- * register access is enabled (UFS and USB PHY isolation): the zumapro SICD
- * CPU_INFORM hints were measured on zumapro's eight cores and are left off
- * until they are verified against zuma's nine.
+ * Zuma (Tensor G3) has the same EL3-protected PMU_ALIVE.  Secure register
+ * access covers UFS and USB PHY isolation, and PMU_INFORM0 enables the C2
+ * idle state (CPU power-down): measured on husky, the three CPU rails drop
+ * from ~410 to ~115 mW at an idle screen.  The zumapro SICD CPU_INFORM hints
+ * were measured on zumapro's eight cores and stay off until they are verified
+ * against zuma's nine (CPU_INFORM runs 0x860..0x880 here).
  */
 const struct exynos_pmu_data zuma_pmu_data = {
 	.pmu_secure = true,
+	.pmu_allow_c2 = true,
 };
 
 /*

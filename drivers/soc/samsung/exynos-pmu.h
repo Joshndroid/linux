@@ -36,6 +36,9 @@ struct exynos_pmu_conf {
  *                   idle intent through CPU_INFORM (and the wakeup mask armed)
  *                   to keep the cores powered down during system idle/sleep,
  *                   because plain PSCI alone does not hold them down.
+ * @pmu_allow_c2: Whether PMU_INFORM0 must tell EL3 that Linux may use the C2
+ *                (CPU power-down) idle state; without it the firmware
+ *                rejects every PSCI CPU_SUSPEND.
  * @pmu_init: Optional init function.
  * @powerdown_conf: Optional callback before entering target system states:
  *                  SYS_AFTR, SYS_LPA, SYS_SLEEP. This will be invoked before
@@ -55,6 +58,7 @@ struct exynos_pmu_data {
 	bool pmu_secure;
 	bool pmu_cpuhp;
 	bool pmu_sicd_wakeup;
+	bool pmu_allow_c2;
 
 	void (*pmu_init)(void);
 	void (*powerdown_conf)(enum sys_powerdown);

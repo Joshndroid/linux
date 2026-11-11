@@ -1298,6 +1298,18 @@ static int exynos_pmu_probe(struct platform_device *pdev)
 			return ret;
 	}
 
+	if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_allow_c2) {
+		/*
+		 * As the downstream cpupm init does on zuma: until PMU_INFORM0
+		 * says C2 is allowed, EL3 rejects every CPU_SUSPEND and the
+		 * cores idle in WFI only.
+		 */
+		ret = regmap_write(pmu_context->pmureg, GS101_INFORM0,
+				   PMU_ALLOWED_C2);
+		if (ret)
+			dev_warn(dev, "cannot allow C2 in PMU_INFORM0: %d\n", ret);
+	}
+
 	if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_sicd_wakeup) {
 		unsigned int inform0 = 0;
 
