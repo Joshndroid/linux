@@ -26,6 +26,7 @@
 #include <linux/mfd/samsung/s2mpg15.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 
@@ -101,6 +102,26 @@ static const struct s2mpg1415_rail s2mpg14_rails[S2MPG1415_METER_CHANNELS] = {
 	{ "VDD_CPUCL2_HD_M",	0x31, DVS_NLDO_POWER_800mA_ON },
 };
 
+/*
+ * zuma (Pixel 8 Pro) uses the same PMIC bucks with zuma's net names
+ * (downstream zuma-pmic.dtsi): BUCK2M feeds the X3 and BUCK3M the A715s,
+ * BUCK9M the LITTLE SRAM, LDO17M (0x2b) the big SRAM. The resolution belongs
+ * to the buck, so only the labels differ; 0x2c/0x31 are not meter-routed
+ * CPU rails on zuma and stay unprogrammed.
+ */
+static const struct s2mpg1415_rail s2mpg14_zuma_rails[S2MPG1415_METER_CHANNELS] = {
+	{ "VDD_MIF",		0x1, CMS_BUCK_POWER },
+	{ "VDD_CPUCL2",		0x2, CMD_BUCK_POWER },
+	{ "VDD_CPUCL1",		0x3, CMT_BUCK_POWER },
+	{ "VDD_CPUCL0",		0x4, CMD_BUCK_POWER },
+	{ "VDD_INT",		0x5, CMT_BUCK_POWER },
+	{ "LLDO1_M",		0x6, CMS_BUCK_POWER },
+	{ "VDD_TPU",		0x7, CMT_BUCK_POWER },
+	{ "LLDO2_M",		0x8, CMS_BUCK_POWER },
+	{ "VDD_CPUCL0_M",	0x9, CMS_BUCK_POWER },
+	{ "VDD_CPUCL2_M",	0x2b, DVS_NLDO_POWER_1200mA_ON },
+};
+
 static const struct s2mpg1415_rail s2mpg15_rails[S2MPG1415_METER_CHANNELS] = {
 	{ "VDD_CAM",		0x1, CMD_BUCK_POWER },
 	{ "VDD_G3D",		0x2, CMD_BUCK_POWER },
@@ -119,6 +140,11 @@ static const struct s2mpg1415_rail s2mpg15_rails[S2MPG1415_METER_CHANNELS] = {
 static const struct s2mpg1415_chip s2mpg14_chip = {
 	.name = "s2mpg14",
 	.rails = s2mpg14_rails,
+};
+
+static const struct s2mpg1415_chip s2mpg14_zuma_chip = {
+	.name = "s2mpg14",
+	.rails = s2mpg14_zuma_rails,
 };
 
 static const struct s2mpg1415_chip s2mpg15_chip = {
@@ -231,6 +257,8 @@ static int s2mpg1415_meter_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	meter->chip = (const void *)platform_get_device_id(pdev)->driver_data;
+	if (meter->chip == &s2mpg14_chip && of_machine_is_compatible("google,zuma"))
+		meter->chip = &s2mpg14_zuma_chip;
 
 	meter->regmap = dev_get_regmap(dev->parent, "meter");
 	if (!meter->regmap)
