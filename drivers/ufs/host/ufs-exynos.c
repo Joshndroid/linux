@@ -257,6 +257,15 @@ static int zuma_ufs_drv_init(struct exynos_ufs *ufs)
 	 */
 	hba->caps &= ~(UFSHCD_CAP_CLK_GATING | UFSHCD_CAP_HIBERN8_WITH_CLK_GATING);
 
+	/*
+	 * The suspend hook (gs101_ufs_suspend()) holds the device in reset, so
+	 * system suspend must power the device down and turn the link off, as
+	 * downstream does (UFS_PM_LVL_5). With the default level (device sleep,
+	 * link in Hibern8) the reset loses the link state and every resume
+	 * fails Hibern8 exit (UPMCRS 5) and needs a full host reset.
+	 */
+	hba->spm_lvl = UFS_PM_LVL_5;
+
 	/* Keep ACG under software control as on GS101. */
 	reg = hci_readl(ufs, HCI_IOP_ACG_DISABLE);
 	hci_writel(ufs, reg & (~HCI_IOP_ACG_DISABLE_EN), HCI_IOP_ACG_DISABLE);
