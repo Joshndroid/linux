@@ -131,6 +131,9 @@ static const struct of_device_id exynos_pmu_of_device_ids[] = {
 		.compatible = "google,zumapro-pmu",
 		.data = &zumapro_pmu_data,
 	}, {
+		.compatible = "google,zuma-pmu",
+		.data = &zuma_pmu_data,
+	}, {
 		.compatible = "samsung,exynos3250-pmu",
 		.data = exynos_pmu_data_arm_ptr(exynos3250_pmu_data),
 	}, {
