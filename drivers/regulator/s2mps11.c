@@ -1790,6 +1790,9 @@ S2MPG10_VOLTAGE_RANGE(s2mpg14_ldo, 5, 700000, 1600000, 1950000, STEP_25_MV);
 /* voltage range for s2mpg14 LDO 4 (group 5: offset at sel 0 = 1.8 V, TS_AVDD) */
 S2MPG10_VOLTAGE_RANGE(s2mpg14_ldo, 4, 1800000, 1800000, 3300000, STEP_25_MV);
 
+/* voltage range for s2mpg14 LDO 22 (group 3: 0.725 V + 12.5 mV, L22M_DISP_VDDD) */
+S2MPG10_VOLTAGE_RANGE(s2mpg14_ldo, 22, 725000, 725000, 1512500, STEP_12_5_MV);
+
 /* voltage range for s2mpg15 BUCK 2, 8, 11 */
 S2MPG10_VOLTAGE_RANGE(s2mpg15_buck, 1, 200000, 450000, 1300000, STEP_6_25_MV);
 
@@ -1901,6 +1904,10 @@ static const struct regulator_desc s2mpg14_regulators[] = {
 	regulator_desc_s2mpg14_ldo(5, "vinl5m", s2mpg14_ldo_vranges5, GENMASK(7, 6)),
 	/* Google gs/3045cdcf: L14M CTRL 0x38, group5, enable bit 7. */
 	regulator_desc_s2mpg14_ldo(14, "vinl14m", s2mpg14_ldo_vranges4, BIT(7)),
+	/* Google gs s2mpg14-regulator.c: L22M CTRL 0x40, group 3, enable bit 7.
+	 * Pixel 8 / 8 Pro panel VDDD.
+	 */
+	regulator_desc_s2mpg14_ldo(22, "vinl22m", s2mpg14_ldo_vranges22, BIT(7)),
 	regulator_desc_s2mpg14_ldo(25, "vinl25m", s2mpg14_ldo_vranges5, BIT(7)),
 };
 
