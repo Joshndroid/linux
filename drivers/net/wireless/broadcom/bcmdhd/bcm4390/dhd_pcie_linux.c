@@ -82,6 +82,7 @@
 
 #if defined(WL_CFG80211)
 #include <wl_cfg80211.h>
+#include <wl_cfgscan.h>
 #endif	/* WL_CFG80211 */
 
 #include <dhd_plat.h>
@@ -802,6 +803,25 @@ dhd_bus_aer_config(dhd_bus_t *bus)
 }
 
 #ifdef OEM_ANDROID
+/*
+ * A plain Linux system suspend has no Android autosleep to retry it, so the
+ * scan wakelock held by a scan in flight must not refuse the suspend. Abort
+ * the scan instead (firmware abort plus an aborted scan-done to cfg80211,
+ * which drops the wakelock); userspace scans again after resume.
+ */
+static void dhdpcie_suspend_cancel_scan(dhd_bus_t *bus)
+{
+#if defined(WL_CFG80211)
+	struct net_device *net;
+
+	if (!bus->dhd->up)
+		return;
+	net = dhd_idx2net(bus->dhd, 0);
+	if (net && wl_get_cfg(net))
+		wl_cfgscan_cancel_scan(wl_get_cfg(net));
+#endif /* WL_CFG80211 */
+}
+
 static int dhdpcie_pm_suspend(struct device *dev)
 {
 	int ret = 0;
@@ -809,6 +829,7 @@ static int dhdpcie_pm_suspend(struct device *dev)
 	dhdpcie_info_t *pch = pci_get_drvdata(pdev);
 	dhd_bus_t *bus = NULL;
 	unsigned long flags;
+	int timeleft;
 
 	if (pch) {
 		bus = pch->bus;
@@ -927,6 +948,7 @@ static int dhdpcie_pci_suspend(struct device *dev)
 #if defined(DEVICE_TX_STUCK_DETECT) && defined(ASSOC_CHECK_SR)
 	dhd_assoc_check_sr(bus->dhd, TRUE);
 #endif /* DEVICE_TX_STUCK_DETECT && ASSOC_CHECK_SR */
+	dhdpcie_suspend_cancel_scan(bus);
 	DHD_GENERAL_LOCK(bus->dhd, flags);
 	if (!DHD_BUS_BUSY_CHECK_IDLE(bus->dhd)) {
 		DHD_BUS_BUSY_SET_SUSPEND_IN_PROGRESS(bus->dhd);
