@@ -648,6 +648,15 @@
 };
 
 /*
+ * Zuma's HSI0 has a USB32DRD + eUSB block whose gates differ from zumapro's,
+ * and several zumapro HSI0 gate offsets are other gates on zuma; see
+ * "google,zuma-g3-cmu-hsi0" in clk-zuma.c.
+ */
+&cmu_hsi0 {
+	compatible = "google,zuma-g3-cmu-hsi0";
+};
+
+/*
  * On zuma all four APM_USI1 pins reach the UART (RXD, TXD, nCTS, nRTS); on
  * zumapro gpa3-2/3 are SPMI, which is why zumapro-pinctrl lists only two.
  */
