@@ -301,6 +301,9 @@ static const struct usf_type_map {
 	/* "Proximity" alone also matches gesture/voice/AAD sensors; be specific */
 	{ "TMD3733 Proximity", "usf_prox", usf_prox_channels,
 	  ARRAY_SIZE(usf_prox_channels), 1, usf_scan_masks_scalar, 1000000000ULL },
+	/* Pixel 8 Pro (husky) */
+	{ "TMD3719 Proximity", "usf_prox", usf_prox_channels,
+	  ARRAY_SIZE(usf_prox_channels), 1, usf_scan_masks_scalar, 1000000000ULL },
 	{ "Barometer", "usf_baro", usf_pressure_channels,
 	  ARRAY_SIZE(usf_pressure_channels), 1, usf_scan_masks_scalar, 100000000ULL },
 	/* the same sensor, named after the part rather than the function */
@@ -773,6 +776,14 @@ static void usf_enumerate(struct usf_iio *usf)
 		dev_info(usf->dev, "  handle 0x%02x : %s\n", handles[i], name);
 
 		if (filtered && !usf_name_has(name, sensor))
+			continue;
+		/*
+		 * "<part> Ambient Light Raw" (husky's TMD3719) is the same
+		 * sensor before the AoC's display compensation; registering it
+		 * too would give userspace two light sensors, and
+		 * iio-sensor-proxy takes the first one it finds.
+		 */
+		if (usf_name_has(name, " Raw"))
 			continue;
 		for (m = 0; m < (int)ARRAY_SIZE(usf_type_maps); m++) {
 			if (usf_name_has(name, usf_type_maps[m].match)) {
