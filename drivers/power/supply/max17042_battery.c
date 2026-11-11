@@ -154,16 +154,17 @@ static int max17042_get_status(struct max17042_chip *chip, int *status)
 		/*
 		 * No charger is registered as our supplier, but the gauge
 		 * measures battery current. Report Charging or Discharging
-		 * from AvgCurrent with hysteresis: the status changes only
+		 * from Current with hysteresis: the status changes only
 		 * when the current passes +/-50 mA and is
-		 * otherwise held. UPower reads every Charging/Full <->
-		 * Discharging flip as a charger plug or unplug, and GNOME
-		 * lights the screen for each one, so the status must not follow
-		 * small drifts around zero.
+		 * otherwise held. AvgCurrent would lag a plug or unplug by
+		 * 15-20 s, the current itself turns within a sample. UPower
+		 * reads every Charging/Full <-> Discharging flip as a charger
+		 * plug or unplug, and GNOME lights the screen for each one, so
+		 * the status must not follow small drifts around zero.
 		 */
-		int band = chip->r_sns / 625 * 20;	/* 50 mA in AvgCurrent LSBs */
+		int band = chip->r_sns / 625 * 20;	/* 50 mA in Current LSBs */
 
-		ret = regmap_read(chip->regmap, MAX17042_AvgCurrent, &data);
+		ret = regmap_read(chip->regmap, MAX17042_Current, &data);
 		if (ret < 0)
 			return ret;
 		current_now = sign_extend32(data, 15);
