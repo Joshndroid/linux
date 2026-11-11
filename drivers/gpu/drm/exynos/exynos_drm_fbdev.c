@@ -44,16 +44,44 @@ static void exynos_drm_fb_destroy(struct fb_info *info)
 	drm_client_release(&fb_helper->client);
 }
 
+/*
+ * Track console drawing as damage.  A command-mode DSI panel only shows what
+ * the DECON sends it, and the DECON sends one frame per atomic commit, so
+ * fbcon writes into the framebuffer must be turned into commits or they never
+ * reach the panel.  The drawing ops record the damaged area and the helper's
+ * damage worker hands it to the framebuffer's dirty callback
+ * (drm_atomic_helper_dirtyfb), which issues the commit.
+ *
+ * fbcon draws straight into the scanout buffer, so unlike drm_fbdev_dma no
+ * shadow blit is needed.  Writes through an mmap of /dev/fb0 are not tracked.
+ */
+FB_GEN_DEFAULT_DEFERRED_DMAMEM_OPS(exynos_drm_fbdev,
+				   drm_fb_helper_damage_range,
+				   drm_fb_helper_damage_area)
+
 static const struct fb_ops exynos_drm_fb_ops = {
 	.owner		= THIS_MODULE,
-	__FB_DEFAULT_DMAMEM_OPS_RDWR,
+	__FB_DEFAULT_DEFERRED_OPS_RDWR(exynos_drm_fbdev),
 	DRM_FB_HELPER_DEFAULT_OPS,
-	__FB_DEFAULT_DMAMEM_OPS_DRAW,
+	__FB_DEFAULT_DEFERRED_OPS_DRAW(exynos_drm_fbdev),
 	.fb_mmap        = exynos_drm_fb_mmap,
 	.fb_destroy	= exynos_drm_fb_destroy,
 };
 
+static int exynos_drm_fbdev_fb_dirty(struct drm_fb_helper *helper,
+				     struct drm_clip_rect *clip)
+{
+	struct drm_framebuffer *fb = helper->fb;
+
+	if (!(clip->x1 < clip->x2 && clip->y1 < clip->y2))
+		return 0;
+	if (!fb->funcs->dirty)
+		return 0;
+	return fb->funcs->dirty(fb, NULL, 0, 0, clip, 1);
+}
+
 static const struct drm_fb_helper_funcs exynos_drm_fbdev_helper_funcs = {
+	.fb_dirty = exynos_drm_fbdev_fb_dirty,
 };
 
 int exynos_drm_fbdev_driver_fbdev_probe(struct drm_fb_helper *helper,
