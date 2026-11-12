@@ -204,6 +204,15 @@ config CPU_FREQ_GOV_SCHEDUTIL
 
 comment "CPU frequency scaling drivers"
 
+config CPUFREQ_TOUCH_BOOST
+	tristate "Raise CPU frequency floors while a touchscreen is in use"
+	depends on INPUT
+	help
+	  While a direct touch device reports events, and for a hold time
+	  after the last one, raise the minimum frequency of chosen cpufreq
+	  policies through freq QoS. Off until the freqs and hold_ms module
+	  parameters are set.
+
 config CPUFREQ_DT
 	tristate "Generic DT based cpufreq driver"
 	depends on HAVE_CLK && OF
