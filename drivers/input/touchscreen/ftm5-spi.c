@@ -10,10 +10,15 @@
  * It relies on the firmware and calibration already stored in the
  * controller's flash: no firmware update, no self-test.
  *
- * Tap to wake: when the panel it is attached to ("panel" phandle) powers
- * down, the controller is put in its low-power scan with only the firmware's
- * double-tap gesture enabled, and a double tap is reported as KEY_WAKEUP.
- * The panel powering back up returns it to active multitouch scanning.
+ * Screen off: when the panel it is attached to ("panel" phandle) powers
+ * down, sensing stops.  With goog,tbn-enabled the SPI bus is then handed to
+ * the AoC over the Touch Bus Negotiator: the AoC firmware runs the controller
+ * itself while the panel is dark and reports a tap-to-wake gesture back over
+ * the negotiator (LPTW), which is reported as KEY_WAKEUP.  The controller's
+ * own firmware gesture mode is not used: nothing reaches the AP from it with
+ * the panel off, and the stock driver never enters it either.  The panel
+ * powering back up reclaims the bus, resets the controller (the AoC has
+ * reprogrammed it) and returns it to active multitouch scanning.
  */
 
 #include <drm/drm_panel.h>
@@ -27,23 +32,26 @@
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/regulator/consumer.h>
+#include <linux/pm_wakeup.h>
+#include <linux/property.h>
 #include <linux/spi/spi.h>
+
+#include "touch_bus_negotiator.h"
 
 #define FTM5_CMD_HW_REG_W	0xFA
 #define FTM5_CMD_HW_REG_R	0xFB
 #define FTM5_CMD_FIFO_READ	0x87
 #define FTM5_CMD_SCAN_MODE	0xA0
-#define FTM5_CMD_FEATURE	0xA2
 
 #define FTM5_ADDR_DCHIP_ID	0x20000000
 #define FTM5_ADDR_FW_VER	0x20000004
 
 #define FTM5_SCAN_ACTIVE	0x00
-#define FTM5_SCAN_LOW_POWER	0x01
-#define FTM5_FEAT_GESTURE	0x03
-#define FTM5_GEST_ID_DBLTAP	0x05
-#define EVT_TYPE_USER_GESTURE	0x02
+#define FTM5_ACTIVE_OFF		0x00	/* "Sense OFF" */
 #define FTM5_ACTIVE_MULTITOUCH	0x01
+
+#define FTM5_WAKE_HOLD_MS	1000	/* keep the AP up long enough to react */
+#define FTM5_RESET_TRIES	3
 
 #define FTM5_EVENT_SIZE		8
 #define FTM5_FIFO_DEPTH		32
@@ -75,8 +83,11 @@ struct ftm5 {
 	struct regulator_bulk_data supplies[2];
 	u8 chip_id[2];
 	struct drm_panel_follower panel_follower;
-	struct mutex lock;		/* scan mode changes */
-	bool low_power;			/* panel off: gesture scan only */
+	struct mutex lock;		/* scan mode and bus ownership */
+	bool low_power;			/* panel off: not sensing */
+	bool tbn_enabled;		/* opted in via goog,tbn-enabled */
+	u32 tbn_mask;			/* device bit from register_tbn() */
+	bool tbn_owned;			/* the bus was released to the AoC */
 };
 
 static int ftm5_write(struct ftm5 *ts, const u8 *buf, size_t len)
@@ -187,19 +198,6 @@ static irqreturn_t ftm5_irq(int irq, void *data)
 			ftm5_report(ts, ev);
 			touched = true;
 			break;
-		case EVT_ID_USER_REPORT:
-			if (ev[1] == EVT_TYPE_USER_GESTURE &&
-			    ev[2] == FTM5_GEST_ID_DBLTAP) {
-				dev_dbg(&ts->spi->dev, "double tap\n");
-				pm_wakeup_event(&ts->spi->dev, 0);
-				input_report_key(ts->input, KEY_WAKEUP, 1);
-				input_sync(ts->input);
-				input_report_key(ts->input, KEY_WAKEUP, 0);
-				input_sync(ts->input);
-			} else {
-				dev_dbg(&ts->spi->dev, "user report %8ph\n", ev);
-			}
-			break;
 		case EVT_ID_ERROR:
 			dev_warn_ratelimited(&ts->spi->dev, "error event %8ph\n", ev);
 			break;
@@ -247,12 +245,129 @@ static void ftm5_release_all(struct ftm5 *ts)
 	input_sync(ts->input);
 }
 
+/*
+ * Reset the controller and start active multitouch scanning, for a controller
+ * the AoC left unresponsive.  The interrupt must be off: the reset's events
+ * are read here.
+ */
+static int ftm5_reset(struct ftm5 *ts)
+{
+	const u8 scan[] = { FTM5_CMD_SCAN_MODE, FTM5_SCAN_ACTIVE,
+			    FTM5_ACTIVE_MULTITOUCH };
+	u8 id[2];
+	int i, ret;
+
+	/*
+	 * Check the controller answers like it did at probe before starting
+	 * the scan, and reset again if it does not: a scan command lost here
+	 * leaves touch dead until the next panel cycle.
+	 */
+	for (i = 0; i < FTM5_RESET_TRIES; i++) {
+		gpiod_set_value_cansleep(ts->reset_gpio, 1);
+		usleep_range(10000, 11000);
+		gpiod_set_value_cansleep(ts->reset_gpio, 0);
+
+		ret = ftm5_wait_ready(ts);
+		if (!ret)
+			ret = ftm5_read_reg(ts, FTM5_ADDR_DCHIP_ID, id, 2);
+		if (!ret && memcmp(id, ts->chip_id, sizeof(id)))
+			ret = -EIO;
+		if (!ret)
+			return ftm5_write(ts, scan, sizeof(scan));
+		dev_warn(&ts->spi->dev, "reset attempt %d failed: %d\n",
+			 i + 1, ret);
+	}
+	return ret;
+}
+
+/*
+ * Take the controller back from the AoC without resetting it: a reset
+ * re-baselines the sensor, and a finger on the glass then (the wake tap, or
+ * the first tap that follows it) is learnt as "no touch" -- that spot stays
+ * dead until drift compensation catches up, tens of seconds later.  Drop
+ * whatever the AoC left queued and start the scan; reset only when the
+ * controller does not answer.  The interrupt must be off.
+ */
+static int ftm5_reclaim(struct ftm5 *ts)
+{
+	const u8 scan[] = { FTM5_CMD_SCAN_MODE, FTM5_SCAN_ACTIVE,
+			    FTM5_ACTIVE_MULTITOUCH };
+	u8 id[2], ev[FTM5_EVENT_SIZE];
+	int i, ret;
+
+	ret = ftm5_read_reg(ts, FTM5_ADDR_DCHIP_ID, id, 2);
+	if (!ret && memcmp(id, ts->chip_id, sizeof(id)))
+		ret = -EIO;
+	if (ret) {
+		dev_warn(&ts->spi->dev, "controller lost with the AoC (%d), resetting\n",
+			 ret);
+		return ftm5_reset(ts);
+	}
+
+	for (i = 0; i < FTM5_FIFO_DEPTH; i++) {
+		ret = ftm5_read_event(ts, ev);
+		if (ret || ev[0] == EVT_ID_NOEVENT)
+			break;
+	}
+	return ftm5_set_scan(ts, scan, sizeof(scan));
+}
+
+/*
+ * The AoC saw a tap-to-wake gesture while it owned the bus and woke the AP
+ * over its mailbox; the touch interrupt stays silent.  Runs in the
+ * negotiator's reader thread.
+ */
+static void ftm5_lptw_report(struct TbnLptwEvent *lptw, void *data)
+{
+	struct ftm5 *ts = data;
+
+	pm_wakeup_event(&ts->spi->dev, FTM5_WAKE_HOLD_MS);
+	input_report_key(ts->input, KEY_WAKEUP, 1);
+	input_sync(ts->input);
+	input_report_key(ts->input, KEY_WAKEUP, 0);
+	input_sync(ts->input);
+}
+
+static void ftm5_tbn_unregister(void *data)
+{
+	struct ftm5 *ts = data;
+
+	register_tbn_lptw_callback(NULL, NULL);
+	unregister_tbn(&ts->tbn_mask);
+}
+
+/*
+ * Take a device bit in the negotiator.  The negotiator waits for the AoC and
+ * so probes well after this driver; until then register_tbn() yields mask 0
+ * and the panel-off path keeps the bus.  Never fatal: touch must not depend
+ * on it.
+ */
+static void ftm5_register_tbn(struct ftm5 *ts)
+{
+	struct device *dev = &ts->spi->dev;
+
+	if (!ts->tbn_enabled || ts->tbn_mask)
+		return;
+	register_tbn(&ts->tbn_mask);
+	if (!ts->tbn_mask)
+		return;
+	if (devm_add_action_or_reset(dev, ftm5_tbn_unregister, ts)) {
+		ts->tbn_mask = 0;
+		return;
+	}
+	register_tbn_lptw_callback(ftm5_lptw_report, ts);
+	dev_info(dev, "AoC bus handoff enabled, mask %#x\n", ts->tbn_mask);
+}
+
+/*
+ * Panel off: stop sensing, then hand the bus to the AoC when the negotiator
+ * is up.  The interrupt stays off while the AoC owns the bus -- the AP must
+ * not drive SPI then, and the AoC wakes it over its own mailbox.
+ */
 static int ftm5_enter_low_power(struct ftm5 *ts)
 {
-	/* gesture bitmask: bit (id % 8) of byte (id / 8), 4 bytes */
-	const u8 feat[] = { FTM5_CMD_FEATURE, FTM5_FEAT_GESTURE,
-			    BIT(FTM5_GEST_ID_DBLTAP), 0, 0, 0 };
-	const u8 scan[] = { FTM5_CMD_SCAN_MODE, FTM5_SCAN_LOW_POWER };
+	const u8 scan[] = { FTM5_CMD_SCAN_MODE, FTM5_SCAN_ACTIVE,
+			    FTM5_ACTIVE_OFF };
 	int ret;
 
 	guard(mutex)(&ts->lock);
@@ -261,18 +376,29 @@ static int ftm5_enter_low_power(struct ftm5 *ts)
 	disable_irq(ts->spi->irq);
 	WRITE_ONCE(ts->low_power, true);
 	ftm5_release_all(ts);
-	ret = ftm5_write(ts, feat, sizeof(feat));
-	if (!ret)
-		ret = ftm5_set_scan(ts, scan, sizeof(scan));
-	enable_irq(ts->spi->irq);
-	if (ret) {
-		dev_err(&ts->spi->dev, "cannot enter gesture mode: %d\n", ret);
-		return ret;
+	ret = ftm5_set_scan(ts, scan, sizeof(scan));
+	if (ret)
+		dev_warn(&ts->spi->dev, "cannot stop sensing: %d\n", ret);
+
+	ftm5_register_tbn(ts);
+	if (ts->tbn_mask && tbn_ready()) {
+		/*
+		 * Owned from here on even if the release fails, so the panel
+		 * coming back always asks for the bus: touch must never be
+		 * left with the AoC holding it.
+		 */
+		ts->tbn_owned = true;
+		ret = tbn_release_bus(ts->tbn_mask);
+		if (ret)
+			dev_warn(&ts->spi->dev, "bus release to AoC failed: %d\n",
+				 ret);
+		return 0;
 	}
-	dev_dbg(&ts->spi->dev, "gesture mode (tap to wake)\n");
+	enable_irq(ts->spi->irq);
 	return 0;
 }
 
+/* Panel on: reclaim the bus if the AoC has it, and sense again. */
 static int ftm5_enter_active(struct ftm5 *ts)
 {
 	const u8 scan[] = { FTM5_CMD_SCAN_MODE, FTM5_SCAN_ACTIVE,
@@ -282,7 +408,18 @@ static int ftm5_enter_active(struct ftm5 *ts)
 	guard(mutex)(&ts->lock);
 	if (!ts->low_power)
 		return 0;
-	ret = ftm5_set_scan(ts, scan, sizeof(scan));
+
+	if (ts->tbn_owned) {
+		ret = tbn_request_bus(ts->tbn_mask);
+		if (ret)
+			dev_warn(&ts->spi->dev, "bus request from AoC failed: %d\n",
+				 ret);
+		ts->tbn_owned = false;
+		ret = ftm5_reclaim(ts);
+		enable_irq(ts->spi->irq);
+	} else {
+		ret = ftm5_set_scan(ts, scan, sizeof(scan));
+	}
 	if (ret) {
 		dev_err(&ts->spi->dev, "cannot resume active scan: %d\n", ret);
 		return ret;
@@ -291,14 +428,14 @@ static int ftm5_enter_active(struct ftm5 *ts)
 	return 0;
 }
 
-static int ftm5_panel_prepared(struct drm_panel_follower *follower)
+static int ftm5_panel_enabled(struct drm_panel_follower *follower)
 {
 	struct ftm5 *ts = container_of(follower, struct ftm5, panel_follower);
 
 	return ftm5_enter_active(ts);
 }
 
-static int ftm5_panel_unpreparing(struct drm_panel_follower *follower)
+static int ftm5_panel_disabling(struct drm_panel_follower *follower)
 {
 	struct ftm5 *ts = container_of(follower, struct ftm5, panel_follower);
 
@@ -307,9 +444,15 @@ static int ftm5_panel_unpreparing(struct drm_panel_follower *follower)
 	return 0;
 }
 
+/*
+ * Enabled/disabling rather than prepared/unpreparing: the AoC gesture-wake
+ * driver arms and disarms its touch gesture sensor on the inner pair, so the
+ * AoC stops using the controller before the AP reclaims and resets it, and
+ * only starts after the AP has let go.
+ */
 static const struct drm_panel_follower_funcs ftm5_panel_follower_funcs = {
-	.panel_prepared = ftm5_panel_prepared,
-	.panel_unpreparing = ftm5_panel_unpreparing,
+	.panel_enabled = ftm5_panel_enabled,
+	.panel_disabling = ftm5_panel_disabling,
 };
 
 static int ftm5_start(struct ftm5 *ts)
@@ -394,6 +537,7 @@ static int ftm5_probe(struct spi_device *spi)
 	input_set_abs_params(ts->input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
 	input_set_abs_params(ts->input, ABS_MT_TOUCH_MINOR, 0, 255, 0, 0);
 	input_set_abs_params(ts->input, ABS_MT_TOOL_TYPE, 0, MT_TOOL_MAX, 0, 0);
+	/* AoC tap to wake (TBN LPTW) arrives as a KEY_WAKEUP press. */
 	input_set_capability(ts->input, EV_KEY, KEY_WAKEUP);
 	touchscreen_parse_properties(ts->input, true, &ts->prop);
 	ret = input_mt_init_slots(ts->input, FTM5_MAX_FINGERS,
@@ -416,7 +560,10 @@ static int ftm5_probe(struct spi_device *spi)
 
 	device_init_wakeup(dev, true);
 
-	/* Tap to wake follows the panel's power; optional. */
+	ts->tbn_enabled = device_property_read_bool(dev, "goog,tbn-enabled");
+	ftm5_register_tbn(ts);
+
+	/* Screen-off handling follows the panel's power; optional. */
 	if (drm_is_panel_follower(dev)) {
 		ts->panel_follower.funcs = &ftm5_panel_follower_funcs;
 		ret = devm_drm_panel_add_follower(dev, &ts->panel_follower);
