@@ -1375,9 +1375,13 @@ static int dhdpcie_suspend_dev(struct pci_dev *dev)
 			__FUNCTION__, ret));
 	}
 
-#ifdef OEM_ANDROID
-	dev->state_saved = FALSE;
-#endif /* OEM_ANDROID */
+	/*
+	 * Leave state_saved set: the config space was saved above while in D0.
+	 * Clearing it while the device sits in D3hot trips the PCI core's
+	 * "State of device not saved" WARN in pci_pm_suspend() and makes
+	 * pci_pm_suspend_noirq() save config space again from the D3hot device.
+	 * dhdpcie_resume_dev() still restores pch->state itself.
+	 */
 
 	dhdpcie_suspend_dump_cfgregs(bus, "AFTER_EP_SUSPEND");
 	dhdpcie_suspend_dump_rc_cfgregs(bus, "AFTER_EP_SUSPEND");
