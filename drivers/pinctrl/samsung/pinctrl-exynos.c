@@ -862,8 +862,10 @@ __init int exynos_eint_wkup_init(struct samsung_pinctrl_drv_data *d)
 			return -ENXIO;
 		}
 
-		bank->eint_num = eint_num;
-		eint_num = eint_num + bank->nr_pins;
+		if (!bank->eint_num_fixed) {
+			bank->eint_num = eint_num;
+			eint_num = eint_num + bank->nr_pins;
+		}
 
 		if (!fwnode_property_present(bank->fwnode, "interrupts")) {
 			bank->eint_type = EINT_TYPE_WKUP_MUX;

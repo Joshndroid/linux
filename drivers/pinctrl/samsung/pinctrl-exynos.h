@@ -236,6 +236,24 @@
 		.name			= id				\
 	}
 
+/*
+ * Like GS101_PIN_BANK_EINTW, for SoCs whose wakeup EINT numbers (the bit of the
+ * pin in the PMU EINT_WAKEUP_MASK registers) do not follow the probe order of
+ * the pin controllers.
+ */
+#define ZUMA_PIN_BANK_EINTW(pins, reg, id, offs, fltcon_offs, num)	\
+	{								\
+		.type			= &exynos850_bank_type_alive,	\
+		.pctl_offset		= reg,				\
+		.nr_pins		= pins,				\
+		.eint_type		= EINT_TYPE_WKUP,		\
+		.eint_offset		= offs,				\
+		.eint_fltcon_offset	= fltcon_offs,			\
+		.eint_num		= num,				\
+		.eint_num_fixed		= true,				\
+		.name			= id				\
+	}
+
 #define ARTPEC_PIN_BANK_EINTG(pins, reg, id, offs)			\
 	{								\
 		.type			= &artpec_bank_type_off,	\
