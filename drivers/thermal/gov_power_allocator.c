@@ -270,6 +270,18 @@ static u32 pid_controller(struct thermal_zone_device *tz,
 			i = i_next;
 			params->err_integral += err;
 		}
+	} else if (!params->trip_switch_on && params->err_integral < 0) {
+		/*
+		 * Without a switch-on trip the controller is always on and
+		 * reset_pid_controller() never runs, so the negative error
+		 * from every brief spike above the control temperature would
+		 * stay in the integral for good: it ratchets down to the
+		 * -max_power clamp and caps the zone far below sustainable
+		 * power while cold.  Let error below the cutoff pay that back,
+		 * but never into credit, so there is still no upward windup.
+		 */
+		params->err_integral = min_t(s64, params->err_integral + err, 0);
+		i = mul_frac(tz->tzp->k_i, params->err_integral);
 	}
 
 	/*
