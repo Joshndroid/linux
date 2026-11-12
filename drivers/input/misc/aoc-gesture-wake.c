@@ -82,6 +82,11 @@ struct agw_gesture {
  * Single Tap" on some firmware and "Touch Single Tap Sensor" on others, and
  * only "Single Tap" is common to both.
  *
+ * Pixel 8 Pro's FTM5 firmware has neither tap sensor; it reports taps on the
+ * dark panel as the "FTM5 Touch Gesture Sensor", which also has to be sampling
+ * for the AoC to pass a tap-to-wake on over the Touch Bus Negotiator. It
+ * defaults on with the tap.
+ *
  * Lift-to-wake defaults off. It fires from the accelerometer alone, so a bag or
  * a nudged desk can trigger it, and an unwanted wake costs battery silently.
  * Tap needs a deliberate touch on the panel and defaults on.
@@ -97,6 +102,7 @@ struct agw_gesture {
  */
 static const struct agw_gesture agw_gestures[] = {
 	{ "single_tap", "Single Tap", KEY_WAKEUP, true },
+	{ "touch_gesture", "Touch Gesture", KEY_WAKEUP, true },
 	{ "long_press", "Long Press", KEY_PROG1, false },
 	{ "lift_to_wake", "Lift to Wake", KEY_WAKEUP, false },
 };
@@ -271,6 +277,7 @@ static ssize_t agw_gesture_store(struct device *dev,
 }
 
 static DEVICE_ATTR(single_tap, 0644, agw_gesture_show, agw_gesture_store);
+static DEVICE_ATTR(touch_gesture, 0644, agw_gesture_show, agw_gesture_store);
 static DEVICE_ATTR(long_press, 0644, agw_gesture_show, agw_gesture_store);
 static DEVICE_ATTR(lift_to_wake, 0644, agw_gesture_show, agw_gesture_store);
 
@@ -333,6 +340,7 @@ static struct attribute *agw_attrs[] = {
 	&dev_attr_rescan.attr,
 	&dev_attr_armed.attr,
 	&dev_attr_single_tap.attr,
+	&dev_attr_touch_gesture.attr,
 	&dev_attr_long_press.attr,
 	&dev_attr_lift_to_wake.attr,
 	NULL,
