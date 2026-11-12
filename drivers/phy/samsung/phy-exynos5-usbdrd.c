@@ -1577,6 +1577,7 @@ exynos2200_usbdrd_link_attach_detach_pipe3_phy(struct phy_usb_instance *inst)
 	writel(reg, regs_base + EXYNOS850_DRD_LINKCTRL);
 
 	reg = readl(regs_base + EXYNOS2200_DRD_HSP_MISC);
+	reg &= ~HSP_MISC_RES_TUNE;
 	if (inst->phy_cfg->id == EXYNOS5_DRDPHY_UTMI) {
 		/* calibrate only eUSB phy */
 		reg |= FIELD_PREP(HSP_MISC_RES_TUNE, RES_TUNE_PHY1);
