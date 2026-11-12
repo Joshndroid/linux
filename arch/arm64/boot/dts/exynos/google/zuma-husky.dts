@@ -3,7 +3,7 @@
  * Google Pixel 8 Pro (husky) device tree.
  *
  * Described and working: UFS, USB peripheral, buttons, ramoops, the s2mpg14/15
- * PMICs, the HK3 panel through DECON/DSIM, FTM5 touch (with double-tap wake),
+ * PMICs, the HK3 panel through DECON/DSIM, FTM5 touch (AoC tap to wake),
  * the Mali-G715 GPU, CPU DVFS and thermal, the MAX77759 fuel gauge, TCPC and
  * charger, CS40L26 haptics, the AoC (sensors, audio, Bluetooth) and the
  * BCM4398 Wi-Fi on PCIe. Not described yet: the Exynos 5300 modem, cameras,
@@ -497,6 +497,29 @@
 		compatible = "google,aoc-usf";
 		google,aoc = <&aoc>;
 	};
+
+	/*
+	 * Touch Bus Negotiator in AoC-channel mode (tbn,mode = 2): the touch
+	 * SPI bus is handed between AP and AoC by messages on the AoC's
+	 * com.google.tbn_service. One consumer, the FTM5.
+	 */
+	tbn: tbn {
+		compatible = "touch_bus_negotiator";
+		google,aoc = <&aoc>;
+		tbn,mode = <2>;
+		tbn,max_devices = <1>;
+	};
+
+	/*
+	 * Gestures the AoC watches on the dark panel: the FTM5 touch gesture
+	 * sensor (tap to wake, KEY_WAKEUP) and long press. Armed only while
+	 * the panel is off.
+	 */
+	aoc-gesture-wake {
+		compatible = "google,aoc-gesture-wake";
+		google,aoc = <&aoc>;
+		panel = <&panel0>;
+	};
 };
 
 &pcie_0 {
@@ -750,8 +773,12 @@
 		avdd-supply = <&m_ldo4_reg>;
 		touchscreen-size-x = <1344>;
 		touchscreen-size-y = <2992>;
-		/* tap to wake: gesture scan while this panel is powered down */
+		/*
+		 * While this panel is powered down the bus belongs to the AoC
+		 * (Touch Bus Negotiator), which watches for tap to wake.
+		 */
 		panel = <&panel0>;
+		goog,tbn-enabled;
 
 		controller-data {
 			samsung,spi-feedback-delay = <0>;
