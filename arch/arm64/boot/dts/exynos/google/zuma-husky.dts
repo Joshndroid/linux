@@ -17,8 +17,7 @@
  *  - UFS VCC enable on gpp0-1 (zuma-ufs.dtsi);
  *  - eUSB2 repeater @0x3e on hsi2c_11, with shusky's tuning
  *    (zuma-shusky-usb.dtsi; zumapro boards use hsi2c_9);
- *  - DECON0 at 0x19470000 (zuma-drm-dpu.dtsi), so the zumapro boards'
- *    autorefresh trick applies unchanged.
+ *  - DECON0 at 0x19470000 (zuma-drm-dpu.dtsi).
  */
 
 /dts-v1/;
@@ -41,12 +40,10 @@
 
 	chosen {
 		/*
-		 * The bootloader requires bootargs to exist.  Stage 1 adds
-		 * verbose logging and keeps clocks/power domains the bootloader
-		 * enabled; panic reboots after 5 s so ramoops can be read on
-		 * the next boot.
+		 * The bootloader requires bootargs to exist. Its content is
+		 * unused: CONFIG_CMDLINE_FORCE replaces it.
 		 */
-		bootargs = "clk_ignore_unused pd_ignore_unused loglevel=8 panic=5 softlockup_panic=1 reboot=warm";
+		bootargs = "";
 
 		/* Filled at boot with an allowlist of the bootloader's board info
 		 * (stage/major/minor, sku), which the Wi-Fi driver uses to pick
@@ -56,45 +53,13 @@
 
 		plat {
 		};
-
-		framebuffer0: framebuffer-0 {
-			compatible = "simple-framebuffer";
-			memory-region = <&cont_splash_mem>;
-			width = <1344>;
-			height = <2992>;
-			stride = <(1344 * 4)>;
-			format = "a8r8g8b8";
-		};
 	};
 
 	/*
-	 * Stage 1 describes only the first 2 GiB bank (inherited from
-	 * zumapro.dtsi), which every zuma board has.  The real layout is in the
-	 * bootloader's FDT, exported at /sys/firmware/luma_bootloader_fdt;
-	 * read it on the first boot and add the remaining 10 GiB here.
+	 * Only the first 2 GiB bank is described here (inherited from
+	 * zumapro.dtsi). The other banks are imported from the bootloader's
+	 * FDT at boot (luma_import_memory()).
 	 */
-
-	reserved-memory {
-		/*
-		 * Bootloader splash.  0xfac00000 is where the zumapro Pixel
-		 * bootloaders place it; verify against the bootloader FDT on
-		 * the first boot.  1344 x 2992 x 4 bytes.
-		 */
-		cont_splash_mem: splash@fac00000 {
-			reg = <0x0 0xfac00000 (1344 * 2992 * 4)>;
-			no-map;
-		};
-	};
-
-	/*
-	 * The panel runs in command mode: without auto-refresh the DECON never
-	 * pushes the splash buffer again and nothing the console draws shows.
-	 */
-	decon_autorefresh_bit: mmio-init@19470030 {
-		compatible = "linux,mmio-init-helper";
-		reg = <0 0x19470030 0x4>;
-		value = <0x3061>;
-	};
 
 	gpio-keys {
 		compatible = "gpio-keys";
@@ -687,15 +652,6 @@
 &gpu {
 	sram-supply = <&s_ldo1_reg>;
 	status = "okay";
-};
-
-/* The DRM pipeline replaces the bootloader splash and its auto-refresh. */
-&framebuffer0 {
-	status = "disabled";
-};
-
-&decon_autorefresh_bit {
-	status = "disabled";
 };
 
 &decon0 {
