@@ -2836,6 +2836,16 @@ static const struct samsung_cmu_info zuma_g3_hsi2_cmu_info __initconst = {
 	.nr_gate_clks		= ARRAY_SIZE(zuma_g3_hsi2_gate_clks),
 	.nr_clk_ids		= CLKS_NR_ZUMA_G3_HSI2,
 	.clk_name		= "bus",
+	/*
+	 * Hardware auto clock gating, as on every other zuma CMU: zuma's
+	 * CONTROLLER_OPTION is at 0x800 too (downstream cmucal-sfr.c), and its
+	 * PMU calibration writes SYSREG_HSI2 BUS_COMPONENT_DRCG_EN (+0x104). It
+	 * has no MEMCLK write for this sysreg, so none here either.
+	 */
+	.auto_clock_gate        = true,
+	.gate_dbg_offset        = GS101_GATE_DBG_OFFSET,
+	.option_offset		= HSI2_CMU_HSI2_CONTROLLER_OPTION,
+	.drcg_offset		= GS101_DRCG_EN_OFFSET,
 };
 
 
