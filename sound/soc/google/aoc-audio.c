@@ -17,6 +17,7 @@
  * Copyright 2026 Trijal Saha <trijalsaha2012@gmail.com>
  */
 
+#include <linux/bitmap.h>
 #include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/hrtimer.h>
@@ -357,6 +358,15 @@ struct aoc_audio {
 	struct completion cmd_done;		/* a control reply arrived */
 	int mic_hw_gain_cb;			/* mic preamp gain, centibels */
 	int mic_soft_gain_db;			/* record soft gain, dB */
+	/*
+	 * Speaker routes whose unbind waits for the amplifiers to power down:
+	 * the TDM clock goes with the last route, and the amplifiers cannot
+	 * finish their power-down sequence without it.
+	 */
+	struct mutex spk_lock;			/* spk_clk_on, spk_unbind */
+	bool spk_clk_on;			/* "AOC TDM Clock" is powered */
+	DECLARE_BITMAP(spk_unbind, 256);	/* by AOC source id */
+	struct delayed_work spk_unbind_work;	/* does the unbinds */
 };
 
 /* Per-open stream state. */
@@ -1302,8 +1312,12 @@ static int aoc_pcm_hw_params(struct snd_soc_component *comp,
 		}
 	}
 
-	ret = aoc_audio_bind(aud, aoc_stream_route_src(s), AOC_SINK_SPEAKER,
+	/* A route still bound from the last stream needs no second bind. */
+	mutex_lock(&aud->spk_lock);
+	ret = test_and_clear_bit(aoc_stream_route_src(s), aud->spk_unbind) ? 0 :
+	      aoc_audio_bind(aud, aoc_stream_route_src(s), AOC_SINK_SPEAKER,
 			     true);
+	mutex_unlock(&aud->spk_lock);
 	if (ret) {
 		dev_err(comp->dev, "speaker bind failed: %d\n", ret);
 		if (s->voice) {
@@ -1354,8 +1368,20 @@ static int aoc_pcm_hw_free(struct snd_soc_component *comp,
 	if (aoc_pcm_is_be(substream) || !s->playback)
 		return 0;
 
-	ret = aoc_audio_bind(aud, aoc_stream_route_src(s), AOC_SINK_SPEAKER,
-			     false);
+	/*
+	 * hw_free runs before the close that powers the amplifiers down, so
+	 * while they are up, leave the route - and with it the TDM clock - to
+	 * aoc_tdm_clk_event().  A call's route keeps its strict teardown order.
+	 */
+	mutex_lock(&aud->spk_lock);
+	if (aud->spk_clk_on && !s->voice) {
+		set_bit(aoc_stream_route_src(s), aud->spk_unbind);
+		ret = 0;
+	} else {
+		ret = aoc_audio_bind(aud, aoc_stream_route_src(s),
+				     AOC_SINK_SPEAKER, false);
+	}
+	mutex_unlock(&aud->spk_lock);
 	/* Reverse of hw_params: the sink goes first, then the mic it needed. */
 	if (s->voice) {
 		int mic = aoc_voice_mic_set(aud, false);
@@ -1510,6 +1536,71 @@ static struct snd_soc_dai_driver aoc_dais[] = {
 };
 
 /*
+ * The amplifiers need the TDM clock until their power-down completes (they
+ * poll for PDN_DONE, which never comes without it), but DAPM powers them down
+ * only after the stream's hw_free has unbound the route that runs the clock.
+ * This supply sits behind the back end, so DAPM powers it down after the
+ * amplifiers, and only then are the unbinds hw_free deferred done.
+ *
+ * Then a little later, not at once: a client probing the device (wireplumber
+ * after every resume) opens, prepares and closes it several times within a
+ * millisecond, and binding the route again while the AOC is still stopping
+ * it leaves the amplifiers without a clock.  A route taken back by
+ * hw_params in the meantime is simply kept.  The work is freezable, so it
+ * never talks to the AOC across system sleep.
+ */
+#define AOC_SPK_UNBIND_DELAY_MS	500
+
+static void aoc_spk_unbind_work(struct work_struct *work)
+{
+	struct aoc_audio *aud = container_of(to_delayed_work(work),
+					     struct aoc_audio, spk_unbind_work);
+	unsigned int src;
+	int ret;
+
+	mutex_lock(&aud->spk_lock);
+	if (!aud->spk_clk_on) {
+		for_each_set_bit(src, aud->spk_unbind, 256) {
+			clear_bit(src, aud->spk_unbind);
+			ret = aoc_audio_bind(aud, src, AOC_SINK_SPEAKER, false);
+			if (ret)
+				dev_err(aud->card.dev,
+					"speaker unbind %u failed: %d\n",
+					src, ret);
+		}
+	}
+	mutex_unlock(&aud->spk_lock);
+}
+
+static int aoc_tdm_clk_event(struct snd_soc_dapm_widget *w,
+			     struct snd_kcontrol *kcontrol, int event)
+{
+	struct snd_soc_card *card = snd_soc_dapm_to_card(w->dapm);
+	struct aoc_audio *aud = container_of(card, struct aoc_audio, card);
+
+	mutex_lock(&aud->spk_lock);
+	aud->spk_clk_on = SND_SOC_DAPM_EVENT_ON(event);
+	if (!aud->spk_clk_on && !bitmap_empty(aud->spk_unbind, 256))
+		mod_delayed_work(system_freezable_wq, &aud->spk_unbind_work,
+				 msecs_to_jiffies(AOC_SPK_UNBIND_DELAY_MS));
+	mutex_unlock(&aud->spk_lock);
+	return 0;
+}
+
+static void aoc_spk_unbind_cancel(void *data)
+{
+	struct aoc_audio *aud = data;
+
+	cancel_delayed_work_sync(&aud->spk_unbind_work);
+}
+
+static const struct snd_soc_dapm_widget aoc_dapm_widgets[] = {
+	SND_SOC_DAPM_SUPPLY("AOC TDM Clock", SND_SOC_NOPM, 0, 0,
+			    aoc_tdm_clk_event,
+			    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+};
+
+/*
  * Both front ends feed the TDM the AOC clocks out.  The telephony one carries
  * no samples, but it needs the same route: it is what brings the back end up,
  * and with it the amplifiers.
@@ -1517,6 +1608,7 @@ static struct snd_soc_dai_driver aoc_dais[] = {
 static const struct snd_soc_dapm_route aoc_dapm_routes[] = {
 	{ "TDM_0_RX Playback", NULL, "AOC Playback" },
 	{ "TDM_0_RX Playback", NULL, "AOC Voice" },
+	{ "TDM_0_RX Playback", NULL, "AOC TDM Clock" },
 };
 
 /*
@@ -1699,6 +1791,8 @@ static int aoc_audio_probe(struct platform_device *pdev)
 		return -EPROBE_DEFER;
 	}
 	mutex_init(&aud->cmd_lock);
+	mutex_init(&aud->spk_lock);
+	INIT_DELAYED_WORK(&aud->spk_unbind_work, aoc_spk_unbind_work);
 	init_completion(&aud->cmd_done);
 	aud->mic_hw_gain_cb = AOC_MIC_HW_GAIN_CB;
 	aud->mic_soft_gain_db = AOC_MIC_REC_SOFT_GAIN_DB;
@@ -1750,10 +1844,17 @@ static int aoc_audio_probe(struct platform_device *pdev)
 	aud->card.dev = dev;
 	aud->card.dai_link = aoc_dai_links;
 	aud->card.num_links = ARRAY_SIZE(aoc_dai_links);
+	aud->card.dapm_widgets = aoc_dapm_widgets;
+	aud->card.num_dapm_widgets = ARRAY_SIZE(aoc_dapm_widgets);
 	aud->card.dapm_routes = aoc_dapm_routes;
 	aud->card.num_dapm_routes = ARRAY_SIZE(aoc_dapm_routes);
 	aud->card.controls = aoc_mic_controls;
 	aud->card.num_controls = ARRAY_SIZE(aoc_mic_controls);
+
+	/* Registered first, so it runs after the card is gone. */
+	ret = devm_add_action(dev, aoc_spk_unbind_cancel, aud);
+	if (ret)
+		goto err_put;
 
 	ret = devm_snd_soc_register_card(dev, &aud->card);
 	if (ret) {
