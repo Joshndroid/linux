@@ -2232,37 +2232,45 @@ const struct samsung_pinctrl_of_match_data gs101_of_data __initconst = {
 	.num_ctrl	= ARRAY_SIZE(gs101_pin_ctrl),
 };
 
-/* pin banks of zuma pin-controller (ALIVE) */
+/*
+ * pin banks of zuma pin-controller (ALIVE)
+ *
+ * The last argument is the bank's wakeup EINT number, i.e. the bit of its first
+ * pin in the PMU EINT_WAKEUP_MASK registers. ALIVE holds 0-49, FAR_ALIVE 50-57
+ * and CUSTOM_ALIVE starts at 192 (past the mask registers, so its wakeups
+ * cannot be gated). The controllers probe ALIVE, CUSTOM_ALIVE, FAR_ALIVE, so
+ * numbering them in probe order would give the wrong bits.
+ */
 static const struct samsung_pin_bank_data zuma_pin_alive[] __initconst = {
-	GS101_PIN_BANK_EINTW(4, 0x0, "gpa0", 0x00, 0x00),
-	GS101_PIN_BANK_EINTW(6, 0x20, "gpa1", 0x04, 0x04),
-	GS101_PIN_BANK_EINTW(4, 0x40, "gpa2", 0x08, 0x0c),
-	GS101_PIN_BANK_EINTW(4, 0x60, "gpa3", 0x0c, 0x10),
-	GS101_PIN_BANK_EINTW(2, 0x80, "gpa4", 0x10, 0x14),
-	GS101_PIN_BANK_EINTW(6, 0xa0, "gpa6", 0x14, 0x18),
-	GS101_PIN_BANK_EINTW(8, 0xc0, "gpa7", 0x18, 0x20),
-	GS101_PIN_BANK_EINTW(4, 0xe0, "gpa8", 0x1c, 0x28),
-	GS101_PIN_BANK_EINTW(7, 0x100, "gpa9", 0x20, 0x2c),
-	GS101_PIN_BANK_EINTW(5, 0x120, "gpa10", 0x24, 0x34),
+	ZUMA_PIN_BANK_EINTW(4, 0x0, "gpa0", 0x00, 0x00, 0),
+	ZUMA_PIN_BANK_EINTW(6, 0x20, "gpa1", 0x04, 0x04, 4),
+	ZUMA_PIN_BANK_EINTW(4, 0x40, "gpa2", 0x08, 0x0c, 10),
+	ZUMA_PIN_BANK_EINTW(4, 0x60, "gpa3", 0x0c, 0x10, 14),
+	ZUMA_PIN_BANK_EINTW(2, 0x80, "gpa4", 0x10, 0x14, 18),
+	ZUMA_PIN_BANK_EINTW(6, 0xa0, "gpa6", 0x14, 0x18, 20),
+	ZUMA_PIN_BANK_EINTW(8, 0xc0, "gpa7", 0x18, 0x20, 26),
+	ZUMA_PIN_BANK_EINTW(4, 0xe0, "gpa8", 0x1c, 0x28, 34),
+	ZUMA_PIN_BANK_EINTW(7, 0x100, "gpa9", 0x20, 0x2c, 38),
+	ZUMA_PIN_BANK_EINTW(5, 0x120, "gpa10", 0x24, 0x34, 45),
 };
 
 /* pin banks of zuma pin-controller (CUSTOM_ALIVE) */
 static const struct samsung_pin_bank_data zuma_pin_custom[] __initconst = {
-	GS101_PIN_BANK_EINTW(1, 0x0, "gpn0", 0x00, 0x00),
-	GS101_PIN_BANK_EINTW(1, 0x20, "gpn1", 0x04, 0x04),
-	GS101_PIN_BANK_EINTW(1, 0x40, "gpn2", 0x08, 0x08),
-	GS101_PIN_BANK_EINTW(1, 0x60, "gpn3", 0x0c, 0x0c),
-	GS101_PIN_BANK_EINTW(1, 0x80, "gpn4", 0x10, 0x10),
-	GS101_PIN_BANK_EINTW(1, 0xa0, "gpn5", 0x14, 0x14),
-	GS101_PIN_BANK_EINTW(1, 0xc0, "gpn6", 0x18, 0x18),
-	GS101_PIN_BANK_EINTW(1, 0xe0, "gpn7", 0x1c, 0x1c),
-	GS101_PIN_BANK_EINTW(1, 0x100, "gpn8", 0x20, 0x20),
-	GS101_PIN_BANK_EINTW(1, 0x120, "gpn9", 0x24, 0x24),
+	ZUMA_PIN_BANK_EINTW(1, 0x0, "gpn0", 0x00, 0x00, 192),
+	ZUMA_PIN_BANK_EINTW(1, 0x20, "gpn1", 0x04, 0x04, 193),
+	ZUMA_PIN_BANK_EINTW(1, 0x40, "gpn2", 0x08, 0x08, 194),
+	ZUMA_PIN_BANK_EINTW(1, 0x60, "gpn3", 0x0c, 0x0c, 195),
+	ZUMA_PIN_BANK_EINTW(1, 0x80, "gpn4", 0x10, 0x10, 196),
+	ZUMA_PIN_BANK_EINTW(1, 0xa0, "gpn5", 0x14, 0x14, 197),
+	ZUMA_PIN_BANK_EINTW(1, 0xc0, "gpn6", 0x18, 0x18, 198),
+	ZUMA_PIN_BANK_EINTW(1, 0xe0, "gpn7", 0x1c, 0x1c, 199),
+	ZUMA_PIN_BANK_EINTW(1, 0x100, "gpn8", 0x20, 0x20, 200),
+	ZUMA_PIN_BANK_EINTW(1, 0x120, "gpn9", 0x24, 0x24, 201),
 };
 
 /* pin banks of zuma pin-controller (FAR_ALIVE) */
 static const struct samsung_pin_bank_data zuma_pin_far[] __initconst = {
-	GS101_PIN_BANK_EINTW(8, 0x0, "gpa5", 0x00, 0x00),
+	ZUMA_PIN_BANK_EINTW(8, 0x0, "gpa5", 0x00, 0x00, 50),
 };
 
 /* pin banks of zuma pin-controller (GSACORE0) */
