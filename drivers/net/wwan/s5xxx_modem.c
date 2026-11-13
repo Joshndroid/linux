@@ -40,6 +40,7 @@
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/list.h>
+#include <linux/luma_bootloader_fdt.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/netdevice.h>
@@ -1365,14 +1366,35 @@ static int s5xxx_load_hwcfg(struct s5xxx_modem *sm, struct s5xxx_hwcfg *cfg)
 	return 0;
 }
 
+/*
+ * Copy an IMEI (the bootloader's ASCII digits) into the handover block.
+ * Prefer the bootloader FDT the kernel kept: the value then never has to sit
+ * in the live device tree, which every user can read. A board whose DT was
+ * given the IMEIs in /chosen/config still works.
+ */
+static void s5xxx_handover_imei(const char *name, u8 *dst)
+{
+	struct device_node *cnode;
+	const void *imei;
+	int len;
+
+	if (luma_bootloader_fdt_read_prop("/chosen/config", name, dst, 16) > 0)
+		return;
+	cnode = of_find_node_by_path("/chosen/config");
+	if (!cnode)
+		return;
+	imei = of_get_property(cnode, name, &len);
+	if (imei && len > 0)
+		memcpy(dst, imei, min(len, 16));
+	of_node_put(cnode);
+}
+
 static int s5xxx_build_handover(struct s5xxx_modem *sm, u8 *buf)
 {
 	char hpath[S5XXX_FW_PATH_MAX];
 	const struct firmware *sha;
-	struct device_node *cnode;
 	struct s5xxx_hwcfg cfg;
-	const void *imei;
-	int ret, len;
+	int ret;
 
 	ret = s5xxx_load_hwcfg(sm, &cfg);
 	if (ret)
@@ -1394,16 +1416,8 @@ static int s5xxx_build_handover(struct s5xxx_modem *sm, u8 *buf)
 	put_unaligned_le32(le32_to_cpu(cfg.variant),   buf + 56);	/* reserved[2] */
 	/* reserved[3] (60) = 0 */
 
-	cnode = of_find_node_by_path("/chosen/config");
-	if (!cnode)
-		return -ENOENT;
-	imei = of_get_property(cnode, "imei1", &len);
-	if (imei && len > 0)
-		memcpy(buf + S5XXX_HANDOVER_IMEI_OFS, imei, min(len, 16));
-	imei = of_get_property(cnode, "imei2", &len);
-	if (imei && len > 0)
-		memcpy(buf + S5XXX_HANDOVER_IMEI_OFS + 16, imei, min(len, 16));
-	of_node_put(cnode);
+	s5xxx_handover_imei("imei1", buf + S5XXX_HANDOVER_IMEI_OFS);
+	s5xxx_handover_imei("imei2", buf + S5XXX_HANDOVER_IMEI_OFS + 16);
 	if (!buf[S5XXX_HANDOVER_IMEI_OFS])	/* imei1 is mandatory */
 		return -ENODATA;
 
@@ -1501,6 +1515,8 @@ static void s5xxx_init_control_messages(struct s5xxx_modem *sm)
 			 "no handover block (DT/cpsha or %s); MAIN may not arm\n",
 			 hpath);
 	}
+	/* The block carries the IMEIs: leave no copy on the stack. */
+	memzero_explicit(handover, sizeof(handover));
 
 	/*
 	 * Fill the pktproc DL descriptor rings here (process context, before BL1)
