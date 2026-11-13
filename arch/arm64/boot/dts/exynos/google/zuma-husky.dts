@@ -7,9 +7,7 @@
  * the Mali-G715 GPU, CPU DVFS and thermal, the MAX77759 fuel gauge, TCPC and
  * charger, CS40L26 haptics, the AoC (sensors, audio, Bluetooth) and the
  * BCM4398 Wi-Fi on PCIe. Not described yet: the Exynos 5300 modem, cameras,
- * fingerprint, USB host/dual-role and USB PD fast charging. Clocks, power
- * domains and regulators the kernel does not model yet stay as the
- * bootloader left them (clk/pd/regulator_ignore_unused).
+ * fingerprint, USB host/dual-role and USB PD fast charging.
  *
  * Board values come from kernel/devices/google/shusky and .../zuma,
  * branch android-gs-shusky-6.1-android16:
@@ -86,12 +84,6 @@
 			gpios = <&gpa4 0 GPIO_ACTIVE_LOW>;
 			wakeup-source;
 		};
-	};
-
-	/* Stands in for PMIC rails the bootloader already enabled. */
-	reg_placeholder: regulator-0 {
-		compatible = "regulator-fixed";
-		regulator-name = "placeholder_reg";
 	};
 
 	ufs_0_fixed_vcc_reg: regulator-1 {
@@ -199,13 +191,13 @@
 };
 
 &ufs_0 {
+	/*
+	 * Only VCC is switched (gpp0-1). VCCQ and the host's rails are
+	 * always-on PMIC rails (downstream zuma-pmic.dtsi: L6M_HSI, L24S_HSI,
+	 * L2S_PLL_MIPI_UFS) that downstream does not hand to UFS either.
+	 */
 	vcc-supply = <&ufs_0_fixed_vcc_reg>;
-	vdd-hba-supply = <&reg_placeholder>;
-	vccq-supply = <&reg_placeholder>;
-	vccq2-supply = <&reg_placeholder>;
 	vcc-max-microamp = <0>;
-	vccq-max-microamp = <0>;
-	vccq2-max-microamp = <0>;
 	status = "okay";
 };
 
@@ -215,8 +207,6 @@
 
 /* USB: peripheral only (no USB-C controller yet), for the NCM gadget. */
 &usbdrd31 {
-	vdd10-supply = <&reg_placeholder>;
-	vdd33-supply = <&reg_placeholder>;
 	status = "okay";
 };
 
@@ -227,16 +217,12 @@
 };
 
 &usbdrd31_phy {
-	pll-supply = <&reg_placeholder>;
-	dvdd-usb20-supply = <&reg_placeholder>;
-	vddh-usb20-supply = <&reg_placeholder>;
-	vdd33-usb20-supply = <&reg_placeholder>;
-	vdda-usbdp-supply = <&reg_placeholder>;
-	vddh-usbdp-supply = <&reg_placeholder>;
 	status = "okay";
 };
 
 &usb_hsphy {
+	vdd-supply = <&m_ldo8_reg>;
+	vdda12-supply = <&m_ldo9_reg>;
 	status = "okay";
 };
 
@@ -292,7 +278,7 @@
 		compatible = "samsung,eusb-repeater";
 		reg = <0x3e>;
 		#phy-cells = <0>;
-		vdd33-supply = <&reg_placeholder>;
+		vdd33-supply = <&m_ldo19_reg>;
 		/* zuma-shusky-usb.dtsi repeater_tune1..8 */
 		samsung,tune-param = <0x50 0x0a>,
 				     <0x70 0x3c>,
@@ -598,6 +584,28 @@
 
 			m_ldo25_reg: ldo25m {
 				regulator-name = "L25M_TSP_DVDD";
+			};
+
+			/*
+			 * eUSB rails (downstream zuma-pmic.dtsi L8M_EUSB,
+			 * L9M_EUSB, L19M_EUSB). Downstream never switches
+			 * LDO8M/LDO9M (initial mode on, no consumer), so they
+			 * stay always-on here too: the eUSB2 PHY would otherwise
+			 * cut them on every power-off. No voltage constraints:
+			 * keep the bootloader's levels.
+			 */
+			m_ldo8_reg: ldo8m {
+				regulator-name = "L8M_EUSB";
+				regulator-always-on;
+			};
+
+			m_ldo9_reg: ldo9m {
+				regulator-name = "L9M_EUSB";
+				regulator-always-on;
+			};
+
+			m_ldo19_reg: ldo19m {
+				regulator-name = "L19M_EUSB";
 			};
 		};
 	};
