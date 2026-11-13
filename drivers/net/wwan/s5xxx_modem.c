@@ -2514,9 +2514,12 @@ static void s5xxx_drain_fmt_rxq(struct s5xxx_modem *sm, u32 intval)
 				s5xxx_circ_read(dump, buff, S5XXX_FMT_RXQ_SIZE,
 						(out + S5XXX_SIT_HDR) % S5XXX_FMT_RXQ_SIZE,
 						n);
-				print_hex_dump(KERN_INFO, "s5xxx fmt rx: ",
-					       DUMP_PREFIX_OFFSET, 16, 1, dump, n,
-					       false);
+				/* CP payloads can carry identifiers and
+				 * message contents: dynamic debug only.
+				 */
+				print_hex_dump_debug("s5xxx fmt rx: ",
+						     DUMP_PREFIX_OFFSET, 16, 1,
+						     dump, n, false);
 			}
 		} else if (plen) {
 			/*
@@ -4197,13 +4200,13 @@ static int s5xxx_dump_boot(struct s5xxx_modem *sm)
 	}
 	if (i == 60)
 		dev_info(sm->dev,
-			 "dump boot: no SRINFO magic after 30 s (head follows)\n");
+			 "dump boot: no SRINFO magic after 30 s (see debugfs srinfo)\n");
 
 	memcpy_fromio(buf, sm->ipc + S5XXX_IPC_SRINFO_OFFSET,
 		      S5XXX_SRINFO_DUMP_MAX);
-	dev_info(sm->dev, "dump boot: srinfo record follows\n");
-	print_hex_dump(KERN_INFO, "s5xxx srinfo: ", DUMP_PREFIX_OFFSET, 16, 1,
-		       buf, S5XXX_SRINFO_DUMP_MAX, true);
+	/* The record stays readable as debugfs srinfo (0400). */
+	print_hex_dump_debug("s5xxx srinfo: ", DUMP_PREFIX_OFFSET, 16, 1,
+			     buf, S5XXX_SRINFO_DUMP_MAX, true);
 	kfree(buf);
 out:
 	release_firmware(sm->pbl);
@@ -4382,9 +4385,10 @@ static void s5xxx_boot_work(struct work_struct *work)
 			if (fh && fh != fmt_dumped) {
 				u32 n = min_t(u32, fh, 64);
 
-				print_hex_dump(KERN_INFO, "s5xxx fmt: ",
-					       DUMP_PREFIX_OFFSET, 16, 1,
-					       sm->ipc + S5XXX_FMT_RXQ_BUFF, n, false);
+				print_hex_dump_debug("s5xxx fmt: ",
+						     DUMP_PREFIX_OFFSET, 16, 1,
+						     sm->ipc + S5XXX_FMT_RXQ_BUFF,
+						     n, false);
 				fmt_dumped = fh;
 			}
 			if (completion_done(&sm->init_done))
