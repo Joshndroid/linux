@@ -1898,6 +1898,31 @@ S2MPG10_VOLTAGE_RANGE(s2mpg15_ldo, 10, 700000, 700000, 2275000, STEP_25_MV);
 	.enable_mask	= _emask,					\
 }
 
+/* On/off only, for rails whose voltage the bootloader sets and nobody changes. */
+static const struct regulator_ops s2mpg1x_reg_enable_only_ops = {
+	.is_enabled		= regulator_is_enabled_regmap,
+	.enable			= regulator_enable_regmap,
+	.disable		= regulator_disable_regmap,
+};
+
+/*
+ * Enable-only s2mpg14 LDOs. Enable fields from downstream
+ * s2mpg14-regulator.c: two-bit mode fields, most in the LDO's own CTRL
+ * register (bits 7:6), LDO8M's in the shared LDO_CTRL1 (bits 1:0).
+ */
+#define regulator_desc_s2mpg14_ldo_en(_num, _ereg, _emask) {		\
+	.name		= "ldo"#_num"m",				\
+	.of_match	= of_match_ptr("ldo"#_num"m"),			\
+	.regulators_node = of_match_ptr("regulators"),			\
+	.id		= S2MPG14_LDO##_num,				\
+	.ops		= &s2mpg1x_reg_enable_only_ops,			\
+	.type		= REGULATOR_VOLTAGE,				\
+	.owner		= THIS_MODULE,					\
+	.enable_reg	= _ereg,					\
+	.enable_mask	= _emask,					\
+	.enable_time	= 130,						\
+}
+
 static const struct regulator_desc s2mpg14_regulators[] = {
 	regulator_desc_s2mpg14_buck(7, "vinb7m", s2mpg14_buck_vranges1),
 	regulator_desc_s2mpg14_ldo(4, "vinl4m", s2mpg14_ldo_vranges4, BIT(7)),
@@ -1909,6 +1934,10 @@ static const struct regulator_desc s2mpg14_regulators[] = {
 	 */
 	regulator_desc_s2mpg14_ldo(22, "vinl22m", s2mpg14_ldo_vranges22, BIT(7)),
 	regulator_desc_s2mpg14_ldo(25, "vinl25m", s2mpg14_ldo_vranges5, BIT(7)),
+	/* eUSB rails: L8M_EUSB, L9M_EUSB, L19M_EUSB. */
+	regulator_desc_s2mpg14_ldo_en(8, S2MPG14_PMIC_LDO_CTRL1, GENMASK(1, 0)),
+	regulator_desc_s2mpg14_ldo_en(9, S2MPG14_PMIC_L9M_CTRL, GENMASK(7, 6)),
+	regulator_desc_s2mpg14_ldo_en(19, S2MPG14_PMIC_L19M_CTRL, GENMASK(7, 6)),
 };
 
 /*
@@ -1921,19 +1950,13 @@ static const struct regulator_desc s2mpg14_regulators[] = {
  * only once a consumer genuinely has to change one, with a datasheet-verified
  * encoding -- LDO5S in particular sits above every LDO range described here.
  */
-static const struct regulator_ops s2mpg15_reg_enable_only_ops = {
-	.is_enabled		= regulator_is_enabled_regmap,
-	.enable			= regulator_enable_regmap,
-	.disable		= regulator_disable_regmap,
-};
-
 /* LxS_CTRL bit 7 is the plain on/off enable; bits 5:0 are the selector. */
 #define regulator_desc_s2mpg15_ldo_en(_num) {				\
 	.name		= "ldo"#_num"s",				\
 	.of_match	= of_match_ptr("ldo"#_num"s"),			\
 	.regulators_node = of_match_ptr("regulators"),			\
 	.id		= S2MPG15_LDO##_num,				\
-	.ops		= &s2mpg15_reg_enable_only_ops,			\
+	.ops		= &s2mpg1x_reg_enable_only_ops,			\
 	.type		= REGULATOR_VOLTAGE,				\
 	.owner		= THIS_MODULE,					\
 	.enable_reg	= S2MPG15_PMIC_L##_num##S_CTRL,			\
@@ -1988,7 +2011,7 @@ static const struct regulator_desc s2mpg15_regulators[] = {
 	regulator_desc_s2mpg15_ldo(12, "vinl12s", s2mpg15_ldo_vranges10,
 				   GENMASK(5, 0), S2MPG15_PMIC_L12S_CTRL,
 				   BIT(7)),
-	/* AoC sensor rails; see s2mpg15_reg_enable_only_ops above */
+	/* AoC sensor rails; see regulator_desc_s2mpg15_ldo_en above */
 	regulator_desc_s2mpg15_ldo_en(5),
 	regulator_desc_s2mpg15_ldo_en(7),
 };
