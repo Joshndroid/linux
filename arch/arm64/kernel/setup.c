@@ -176,6 +176,7 @@ static void __init smp_build_mpidr_hash(void)
  * for a local handover audit; do not merge Android bindings into the native DT.
  */
 #include "luma_tokay_fdt.h"
+#include <linux/luma_bootloader_fdt.h>
 static const void *luma_bootloader_fdt_virtual __initdata;
 static phys_addr_t luma_bootloader_fdt_phys;
 static int luma_bootloader_fdt_size;
@@ -206,6 +207,39 @@ static int __init luma_bootloader_fdt_import(void)
 	return 0;
 }
 subsys_initcall(luma_bootloader_fdt_import);
+
+/*
+ * Per-unit values (the modem's IMEIs) stay in the bootloader blob: a driver
+ * reads one straight into its own buffer, and nothing is added to the live
+ * DT, sysfs or the log.
+ */
+int luma_bootloader_fdt_read_prop(const char *path, const char *name,
+				  void *buf, size_t size)
+{
+	const void *val;
+	void *blob;
+	int node, len;
+
+	if (!luma_bootloader_fdt_size)
+		return -ENODEV;
+	blob = memremap(luma_bootloader_fdt_phys, luma_bootloader_fdt_size,
+			MEMREMAP_WB);
+	if (!blob)
+		return -ENOMEM;
+	len = -ENOENT;
+	if (fdt_check_header(blob) == 0 &&
+	    fdt_totalsize(blob) <= luma_bootloader_fdt_size) {
+		node = fdt_path_offset(blob, path);
+		val = node >= 0 ? fdt_getprop(blob, node, name, &len) : NULL;
+		if (val && len >= 0)
+			memcpy(buf, val, min_t(size_t, len, size));
+		else
+			len = -ENOENT;
+	}
+	memunmap(blob);
+	return len;
+}
+EXPORT_SYMBOL_GPL(luma_bootloader_fdt_read_prop);
 
 static int __init luma_bootloader_fdt_sysfs_init(void)
 {
