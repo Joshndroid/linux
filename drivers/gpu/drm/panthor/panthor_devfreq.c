@@ -7,6 +7,7 @@
 #include <linux/platform_device.h>
 #include <linux/pm_opp.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 
 #include <drm/drm_managed.h>
 #include <drm/drm_print.h>
@@ -223,11 +224,13 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 	 */
 	table = dev_pm_opp_get_opp_table(dev);
 	if (IS_ERR_OR_NULL(table)) {
-		ret = devm_pm_opp_set_regulators(dev, reg_names);
-		if (ret && ret != -ENODEV) {
-			if (ret != -EPROBE_DEFER)
-				DRM_DEV_ERROR(dev, "Couldn't set OPP regulators\n");
-			return ret;
+		if (device_property_present(dev, "mali-supply")) {
+			ret = devm_pm_opp_set_regulators(dev, reg_names);
+			if (ret && ret != -ENODEV) {
+				if (ret != -EPROBE_DEFER)
+					DRM_DEV_ERROR(dev, "Couldn't set OPP regulators\n");
+				return ret;
+			}
 		}
 
 		/*
