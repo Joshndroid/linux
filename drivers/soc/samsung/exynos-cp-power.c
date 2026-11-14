@@ -39,6 +39,9 @@ struct exynos_cp_power {
 	struct regmap		*pmic;		/* CP PMIC, SID 0 */
 	struct regmap		*dcxo;		/* S5910 DCXO buffer, SID 5 */
 	bool			spmi_ready;	/* slaves resolved (lazily) */
+	/* S5910 turn-on sequence: <reg val delay-ms> triplets */
+	const u32		*dcxo_seq;
+	int			dcxo_seq_len;	/* triplets */
 	bool			ever_powered_on;	/* gate the S5910 re-arm */
 };
 
@@ -118,14 +121,20 @@ static void exynos_cp_power_setup_spmi(struct exynos_cp_power *cp)
  */
 static void exynos_cp_power_s5910_on_seq(struct exynos_cp_power *cp)
 {
-	/* komodo fdt s5910,on_seq */
-	static const struct { u16 reg; u8 val; } on_seq[] = {
-		{ 0x211, 0x47 },
-		{ 0x236, 0x0e },
-		{ 0x215, 0x7f },
-		{ 0x20e, 0x00 },	/* DCXO LPM mode off */
+	/*
+	 * komodo fdt s5910,on_seq: the default when the board gives none.  The
+	 * buffer's settings are board-specific (husky's bootloader DT has its
+	 * own), so a board that differs supplies google,dcxo-on-seq.
+	 */
+	static const u32 komodo_seq[] = {
+		0x211, 0x47, 0,
+		0x236, 0x0e, 0,
+		0x215, 0x7f, 0,
+		0x20e, 0x00, 0,		/* DCXO LPM mode off */
 	};
 	static const u16 dump_regs[] = { 0x20e, 0x211, 0x215, 0x236, 0x240 };
+	const u32 *seq = cp->dcxo_seq ?: komodo_seq;
+	int n = cp->dcxo_seq ? cp->dcxo_seq_len : ARRAY_SIZE(komodo_seq) / 3;
 	struct device *dev = cp->dev;
 	unsigned int val;
 	int i, retry, ret;
@@ -140,18 +149,21 @@ static void exynos_cp_power_s5910_on_seq(struct exynos_cp_power *cp)
 			dev_info(dev, "s5910 reg %#x = %#02x\n", dump_regs[i], val);
 	}
 
-	for (i = 0; i < ARRAY_SIZE(on_seq); i++) {
+	for (i = 0; i < n; i++) {
+		u32 reg = seq[3 * i], v = seq[3 * i + 1], delay = seq[3 * i + 2];
+
 		for (retry = 0; retry < 2; retry++) {
-			ret = regmap_write(cp->dcxo, on_seq[i].reg, on_seq[i].val);
+			ret = regmap_write(cp->dcxo, reg, v);
 			if (!ret)
 				break;
 			msleep(2);
 		}
 		if (ret) {
-			dev_err(dev, "s5910 write %#x=%#x failed\n",
-				on_seq[i].reg, on_seq[i].val);
+			dev_err(dev, "s5910 write %#x=%#x failed\n", reg, v);
 			return;
 		}
+		if (delay)
+			msleep(delay);
 	}
 	dev_info(dev, "s5910 turn-on sequence completed (DCXO LPM off)\n");
 }
@@ -378,6 +390,7 @@ static int exynos_cp_power_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct exynos_cp_power *cp;
+	int n;
 
 	cp = devm_kzalloc(dev, sizeof(*cp), GFP_KERNEL);
 	if (!cp)
@@ -406,6 +419,29 @@ static int exynos_cp_power_probe(struct platform_device *pdev)
 		dev_warn(dev, "no cp-dump-noti gpio (vendor clears it pre-reset)\n");
 	if (!cp->cp2ap_cp_wrst)
 		dev_warn(dev, "no cp2ap-cp-wrst gpio (reset unhandshaken)\n");
+
+	n = of_property_count_u32_elems(dev->of_node, "google,dcxo-on-seq");
+	if (n > 0) {
+		u32 *seq;
+		int i;
+
+		if (n % 3)
+			return dev_err_probe(dev, -EINVAL,
+					     "google,dcxo-on-seq: not <reg val delay-ms> triplets\n");
+		seq = devm_kcalloc(dev, n, sizeof(*seq), GFP_KERNEL);
+		if (!seq)
+			return -ENOMEM;
+		if (of_property_read_u32_array(dev->of_node, "google,dcxo-on-seq",
+					       seq, n))
+			return -EINVAL;
+		for (i = 0; i < n; i += 3)
+			if (seq[i] > 0xffff || seq[i + 1] > 0xff || seq[i + 2] > 2000)
+				return dev_err_probe(dev, -EINVAL,
+						     "google,dcxo-on-seq: entry %d out of range\n",
+						     i / 3);
+		cp->dcxo_seq = seq;
+		cp->dcxo_seq_len = n / 3;
+	}
 
 	/*
 	 * The SPMI slaves are resolved lazily on the first reset, not here, so
