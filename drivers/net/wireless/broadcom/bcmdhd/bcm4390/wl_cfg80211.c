@@ -195,7 +195,7 @@ static struct bcm_cfg80211 *g_bcmcfg = NULL;
  * dhd_msg_level and dhd_log_level have the same level
  * IOVAR(loglevel) can adjust logging level dynamically
  */
-u32 wl_dbg_level = WL_DBG_ERR | WL_DBG_P2P_ACTION | WL_DBG_INFO;
+u32 wl_dbg_level = WL_DBG_ERR | WL_DBG_P2P_ACTION;
 u32 wl_log_level = WL_DBG_ERR | WL_DBG_P2P_ACTION | WL_DBG_INFO;
 #endif /* DHD_DEBUG */
 
