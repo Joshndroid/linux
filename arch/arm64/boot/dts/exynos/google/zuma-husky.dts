@@ -22,6 +22,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/spmi/spmi.h>
 #include <dt-bindings/usb/pd.h>
 #include "zumapro-pinctrl.h"
 #include "zuma.dtsi"
@@ -98,6 +99,25 @@
 };
 
 &pinctrl_gpio_alive {
+	/* Modem CP2AP inputs, as husky's bootloader DT sets them up */
+	cp2ap_wakeup: cp2ap-wakeup-pins {
+		samsung,pins = "gpa6-5";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_DOWN>;
+	};
+
+	cp2ap_phone_active: cp2ap-phone-active-pins {
+		samsung,pins = "gpa7-0";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+	};
+
+	cp2ap_cp_wrst: cp2ap-cp-wrst-pins {
+		samsung,pins = "gpa0-1";
+		samsung,pin-function = <GS101_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+	};
+
 	key_power: key-power-pins {
 		samsung,pins = "gpa4-0";
 		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
@@ -473,7 +493,109 @@
 	};
 };
 
+/*
+ * Modem: Exynos Modem 5300 on PCIe CH0 (HSI1), driven by s5xxx_modem (the
+ * Pixel 9 driver's s5300 variant). Wiring from husky's bootloader DT (cpif,
+ * s5910_bb, pcie@12100000 and the cp_* reserved memory):
+ *   AP2CP: cp_pwr_on gph1-2, nreset_n gph1-7, cp_wrst_n gph1-1, pda_active
+ *          gph1-0, wake_up gph0-2, dump_noti gph0-3, pm_wrst_n gpa0-2
+ *   CP2AP: wake_up gpa6-5, phone_active gpa7-0, cp_wrst_n gpa0-1
+ *   PERST gph0-0, CLKREQ gph0-1, doorbell 0x14e60000; carveouts as Pixel 9.
+ * Husky has no AP2CP partial-reset line, and no CP PMIC on the bit-banged
+ * SPMI bus (gpa3-0/1, free: serial_18 stays off): only the S5910 DCXO buffer,
+ * with husky's own turn-on sequence (bootloader DT s5910,seq).
+ *
+ * Everything here stays disabled until the first CP boot is cleared: the RC
+ * probe already powers the CP (exynos_cp_power_warm_reset()) and the modem
+ * probe boots it. The carveouts are disabled too, so they cost no RAM yet.
+ */
+/ {
+	spmi-1 {
+		compatible = "google,bitbang-spmi-controller";
+		#address-cells = <2>;
+		#size-cells = <0>;
+		sclk-gpios = <&gpa3 0 GPIO_ACTIVE_HIGH>;
+		sdata-gpios = <&gpa3 1 GPIO_ACTIVE_HIGH>;
+		delay-us = <10>;
+		status = "disabled";
+
+		cp_s5910: clock-buffer@5 {
+			compatible = "google,s5910-spmi";
+			reg = <5 SPMI_USID>;
+		};
+	};
+
+	cp_power: cp-power {
+		compatible = "google,exynos-cp-power";
+		cp-pwr-gpios = <&gph1 2 GPIO_ACTIVE_HIGH>;
+		cp-nreset-gpios = <&gph1 7 GPIO_ACTIVE_HIGH>;
+		cp-pm-wrst-gpios = <&gpa0 2 GPIO_ACTIVE_HIGH>;
+		cp-wrst-gpios = <&gph1 1 GPIO_ACTIVE_HIGH>;
+		cp-pda-active-gpios = <&gph1 0 GPIO_ACTIVE_HIGH>;
+		cp-dump-noti-gpios = <&gph0 3 GPIO_ACTIVE_HIGH>;
+		cp2ap-cp-wrst-gpios = <&gpa0 1 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&cp2ap_cp_wrst>;
+		google,cp-dcxo = <&cp_s5910>;
+		/* write 0x215 = 0x0f, wait 1 s, 0x20e = 0x04, 0x240 = 0x10 */
+		google,dcxo-on-seq = <0x215 0x0f 1000>,
+				     <0x20e 0x04 0>,
+				     <0x240 0x10 0>;
+		status = "disabled";
+	};
+
+	reserved-memory {
+		/* CP IPC + boot-image staging (bootloader DT cp_rmem) */
+		cp_rmem_reserved: cp-rmem@ea400000 {
+			reg = <0x0 0xea400000 0xc00000>;
+			no-map;
+			status = "disabled";
+		};
+
+		/* CP MSI status page (cp_msi_rmem) */
+		cp_msi_rmem_reserved: cp-msi-rmem@f6200000 {
+			reg = <0x0 0xf6200000 0x1000>;
+			no-map;
+			status = "disabled";
+		};
+
+		/* CP PKTPROC rings (cp_rmem_1); CP-side base 0x20000000 */
+		cp_pktproc_rmem_reserved: cp-pktproc-rmem@e8000000 {
+			reg = <0x0 0xe8000000 0x2000000>;
+			no-map;
+			status = "disabled";
+		};
+	};
+
+	modem {
+		compatible = "samsung,s5300-modem";
+		memory-region = <&cp_rmem_reserved>, <&cp_msi_rmem_reserved>,
+				<&cp_pktproc_rmem_reserved>;
+		memory-region-names = "ipc", "msi", "pktproc";
+		/*
+		 * The phone's own modem partition, mounted read-only at this
+		 * path in the root-only firmware directory; the driver parses
+		 * the TOC and stages the BOOT section.
+		 */
+		firmware-name = "google/s5300/modem/images/default/modem.bin";
+		google,pcie = <&pcie_0>;
+		samsung,doorbell-addr = <0x14e60000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&cp2ap_wakeup &cp2ap_phone_active>;
+		cp2ap-wakeup-gpios = <&gpa6 5 GPIO_ACTIVE_HIGH>;
+		/* high while the CP runs; a fall after ONLINE is a CP crash */
+		cp2ap-active-gpios = <&gpa7 0 GPIO_ACTIVE_HIGH>;
+		status = "disabled";
+	};
+};
+
 &pcie_0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie0_clkreq &pcie0_perst>;
+	reset-gpios = <&gph0 0 GPIO_ACTIVE_HIGH>;	/* PERST */
+	/* AP2CP_WAKEUP: runtime link request, owned by the RC */
+	google,cp-wakeup-gpios = <&gph0 2 GPIO_ACTIVE_HIGH>;
+	google,cp-power = <&cp_power>;
 	status = "disabled";
 };
 
