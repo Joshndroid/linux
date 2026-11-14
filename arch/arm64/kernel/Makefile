@@ -53,12 +53,12 @@ obj-$(CONFIG_HAVE_STATIC_CALL)		+= static_call.o
 obj-$(CONFIG_CPU_PM)			+= sleep.o suspend.o
 obj-$(CONFIG_KGDB)			+= kgdb.o
 obj-$(CONFIG_EFI)			+= efi.o efi-rt-wrapper.o
-obj-$(CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC) += luma_tokay_dtb.o luma_tokay_fdt.o
+obj-$(CONFIG_LUMA_EMBEDDED_DTB_HANDOFF) += luma_embedded_dtb.o luma_embedded_fdt.o
 luma_embedded_dtb := arch/arm64/boot/dts/$(CONFIG_LUMA_EMBEDDED_DTB:"%"=%).dtb
-AFLAGS_luma_tokay_dtb.o += -I$(objtree) -DLUMA_EMBEDDED_DTB='"$(luma_embedded_dtb)"'
+AFLAGS_luma_embedded_dtb.o += -I$(objtree) -DLUMA_EMBEDDED_DTB='"$(luma_embedded_dtb)"'
 # .incbin is not tracked by the assembler dependency file.
 # Build the DTB explicitly before Image; relink whenever its bytes change.
-$(obj)/luma_tokay_dtb.o: $(luma_embedded_dtb)
+$(obj)/luma_embedded_dtb.o: $(luma_embedded_dtb)
 
 obj-$(CONFIG_PCI)			+= pci.o
 obj-$(CONFIG_ARMV8_DEPRECATED)		+= armv8_deprecated.o

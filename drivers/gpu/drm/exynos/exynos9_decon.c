@@ -37,14 +37,6 @@
 #include "exynos9_decon.h"
 #include "regs-decon9.h"
 
-/*
- * Command-mode escape hatch: leaving the trigger armed makes the DECON re-send
- * the last frame on every TE, which is how this driver ran before one-shot.
- */
-static bool decon_oneshot = true;
-module_param_named(oneshot, decon_oneshot, bool, 0644);
-MODULE_PARM_DESC(oneshot, "command mode: send one frame per commit");
-
 /* PD : Porter-Duff */
 enum decon_blend_pd_func {
 	PD_FUNC_CLEAR = 0x0,
@@ -1644,14 +1636,7 @@ static void decon_set_mode(struct exynos_drm_crtc *crtc)
 		mode->op_mode = crtc->i80_mode ? DECON_MIPI_COMMAND_MODE :
 						 DECON_VIDEO_MODE;
 
-	/*
-	 * Command mode: drive frames from the panel's hardware TE. The DECON
-	 * latches the shadow config and emits a frame on each TE edge; the SW
-	 * trigger does not reliably latch on this DECON (the shadow-update
-	 * request was never consumed and the DECON sat idle). TE is confirmed
-	 * reaching the DECON (HW_TE_CNT increments), and the TE pad is routed to
-	 * DDI0, so use HW trigger as the vendor does for command mode.
-	 */
+	/* Vendor normal mode uses the panel's hardware TE signal. */
 	if (mode->op_mode == DECON_MIPI_COMMAND_MODE)
 		mode->te_mode = DECON_HW_TRIG;
 
@@ -1941,8 +1926,7 @@ static irqreturn_t decon_irq_handler(int irq, void *dev_id)
 	 * the trigger again - a late one would disarm a frame that has not been
 	 * sent, stalling it until the next commit.
 	 */
-	if (decon_oneshot)
-		ctx->cal_ops->set_te(ctx, DECON_TRIG_MASK);
+	ctx->cal_ops->set_te(ctx, DECON_TRIG_MASK);
 
 	return IRQ_HANDLED;
 }

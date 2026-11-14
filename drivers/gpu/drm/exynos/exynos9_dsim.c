@@ -43,15 +43,6 @@
 /* fallback refresh rate until the first mode_set (any sane value works) */
 #define DSIM_DEFAULT_VREFRESH	60
 
-static bool dsim_pkt_go;
-module_param_named(pkt_go, dsim_pkt_go, bool, 0644);
-MODULE_PARM_DESC(pkt_go, "release commands with the PKT_GO handshake");
-
-static bool dsim_te_cmd_allow;
-module_param_named(te_cmd_allow, dsim_te_cmd_allow, bool, 0644);
-MODULE_PARM_DESC(te_cmd_allow,
-		 "gate command transfers on the panel TE window (jams the FIFO)");
-
 struct zuma_dsim {
 	struct mutex transfer_lock;
 	struct device *dev;
@@ -567,11 +558,6 @@ static int zuma_dsim_dphy_enable_lanes(struct zuma_dsim *dsim)
 	return ret;
 }
 
-static int dsim_comp_align = 4;
-module_param_named(comp_align, dsim_comp_align, int, 0644);
-MODULE_PARM_DESC(comp_align,
-		 "pixel alignment of the per-slice compressed width (0 = none)");
-
 /* Program the command-mode + DSC link config (vendor set_config subset) */
 static void zuma_dsim_set_config(struct zuma_dsim *dsim)
 {
@@ -591,7 +577,7 @@ static void zuma_dsim_set_config(struct zuma_dsim *dsim)
 	 * link. Eight-pixel rounding requests 368 transport pixels for Tokay,
 	 * while DECON provides 360, causing an observed DSIM underrun.
 	 */
-	u32 width = dsc ? roundup(comp_w, dsim_comp_align ?: 1) * slice_cnt :
+	u32 width = dsc ? roundup(comp_w, 4) * slice_cnt :
 			  dsim->hactive;
 
 	dsim_rmw(dsim, DSIM_SFR_CTRL, DSIM_SFR_CTRL_SHADOW_REG_READ_EN,
@@ -605,8 +591,7 @@ static void zuma_dsim_set_config(struct zuma_dsim *dsim)
 	dsim_rmw(dsim, DSIM_ESCMODE,
 		 DSIM_ESCMODE_STOP_STATE_CNT(DSIM_STOP_STATE_CNT),
 		 DSIM_ESCMODE_STOP_STATE_CNT_MASK | DSIM_ESCMODE_CMD_LPDT);
-	dsim_rmw(dsim, DSIM_OPTION_SUITE,
-		 dsim_te_cmd_allow ? DSIM_OPTION_SUITE_OPT_TE_ON_CMD_ALLOW : 0,
+	dsim_rmw(dsim, DSIM_OPTION_SUITE, 0,
 		 DSIM_OPTION_SUITE_OPT_TE_ON_CMD_ALLOW);
 
 	writel(DSIM_THRESHOLD_LEVEL(width), dsim->regs + DSIM_THRESHOLD);
@@ -638,9 +623,7 @@ static void zuma_dsim_set_config(struct zuma_dsim *dsim)
 		       DSIM_SLICE01_SIZE_OF_SLICE1(slice_cnt > 1 ? slice_w : 0),
 		       dsim->regs + DSIM_SLICE01);
 	}
-	dsim_rmw(dsim, DSIM_CMD_CONFIG,
-		 dsim_pkt_go ? DSIM_CMD_CONFIG_PKT_GO_EN : 0,
-		 DSIM_CMD_CONFIG_PKT_GO_EN);
+	dsim_rmw(dsim, DSIM_CMD_CONFIG, 0, DSIM_CMD_CONFIG_PKT_GO_EN);
 }
 
 /* Full cold link init (vendor dsim_reg_init): own the DCPHY from scratch. */
@@ -705,8 +688,7 @@ static void zuma_dsim_configure(struct zuma_dsim *dsim)
 	 * and (re)program the stable-VFP / TE protect+timeout. SFR-only, does not
 	 * touch the D-PHY, so the live HS link survives.
 	 */
-	dsim_rmw(dsim, DSIM_OPTION_SUITE,
-		 dsim_te_cmd_allow ? DSIM_OPTION_SUITE_OPT_TE_ON_CMD_ALLOW : 0,
+	dsim_rmw(dsim, DSIM_OPTION_SUITE, 0,
 		 DSIM_OPTION_SUITE_OPT_TE_ON_CMD_ALLOW);
 	stable_vfp = dsim->hactive * DSIM_STABLE_VFP_VALUE / 100;
 	/* TE protect/timeout windows scale with the frame period (vrefresh) */
@@ -901,9 +883,7 @@ static ssize_t zuma_dsim_host_transfer(struct mipi_dsi_host *host,
 		return ret;
 
 	mutex_lock(&dsim->transfer_lock);
-	/* Same per-message semantics as the mainline Samsung DSIM host. The
-	 * prior callback silently ignored MIPI_DSI_MSG_USE_LPM.
-	 */
+	/* Same per-message semantics as the mainline Samsung DSIM host. */
 	dsim_rmw(dsim, DSIM_ESCMODE,
 		 (msg->flags & MIPI_DSI_MSG_USE_LPM) ?
 		 DSIM_ESCMODE_CMD_LPDT : 0, DSIM_ESCMODE_CMD_LPDT);
@@ -960,14 +940,6 @@ static ssize_t zuma_dsim_host_transfer(struct mipi_dsi_host *host,
 		       DSIM_PKTHDR_DATA0(packet.header[1]) |
 		       DSIM_PKTHDR_DATA1(packet.header[2]),
 	       dsim->regs + DSIM_PKTHDR);
-
-	/*
-	 * With the DECON streaming, the header only leaves the FIFO once the
-	 * link opens a command window; the vendor releases it with PKT_GO.
-	 */
-	if (dsim_pkt_go)
-		dsim_rmw(dsim, DSIM_CMD_CONFIG, DSIM_CMD_CONFIG_PKT_GO_RDY,
-			 DSIM_CMD_CONFIG_PKT_GO_RDY);
 
 	/* wait for the header (and payload) FIFO to drain */
 	mask = DSIM_FIFOCTRL_EMPTY_PH_SFR;
@@ -1119,7 +1091,6 @@ static int zuma_dsim_probe(struct platform_device *pdev)
 	 * its own for the DCS that runs outside it.
 	 */
 	pm_runtime_enable(dev);
-
 	ret = component_add(dev, &zuma_dsim_component_ops);
 	if (ret) {
 		pm_runtime_disable(dev);

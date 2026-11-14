@@ -44,7 +44,7 @@ enum fixed_addresses {
 	 */
 	FIX_FDT_END,
 	FIX_FDT = FIX_FDT_END + DIV_ROUND_UP(MAX_FDT_SIZE, PAGE_SIZE) + 1,
-#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+#ifdef CONFIG_LUMA_EMBEDDED_DTB_HANDOFF
 	/* Independent bounded window for the authentic bootloader handover. */
 	FIX_LUMA_FDT_END,
 	FIX_LUMA_FDT = FIX_LUMA_FDT_END + DIV_ROUND_UP(MAX_FDT_SIZE, PAGE_SIZE) + 1,
@@ -116,7 +116,7 @@ enum fixed_addresses {
 #define FIXMAP_PAGE_IO     __pgprot(PROT_DEVICE_nGnRE)
 
 void __init early_fixmap_init(void);
-#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+#ifdef CONFIG_LUMA_EMBEDDED_DTB_HANDOFF
 void *__init fixmap_remap_luma_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot);
 #endif
 

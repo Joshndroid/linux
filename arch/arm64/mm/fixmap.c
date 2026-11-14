@@ -180,7 +180,7 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 	return remap_fdt_window(dt_phys, size, prot, FIX_FDT);
 }
 
-#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+#ifdef CONFIG_LUMA_EMBEDDED_DTB_HANDOFF
 void *__init fixmap_remap_luma_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 {
 	return remap_fdt_window(dt_phys, size, prot, FIX_LUMA_FDT);

@@ -2495,23 +2495,21 @@ config CMDLINE_FORCE
 
 endchoice
 
-config LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
-	bool "Project Luma Tokay embedded diagnostic"
+config LUMA_EMBEDDED_DTB_HANDOFF
+	bool "Luma embedded device-tree handoff"
 	depends on ARM64
 	help
-	  Link the exact generated Zumapro Tokay DTB into a diagnostic-only
-	  kernel and use it instead of the prior-stage FDT at primary entry.
-	  This is an explicit Project Luma bring-up option, not a general arm64
-	  boot protocol and not suitable for a multi-device release kernel.
+	  Link the selected Luma device tree into the kernel and use it instead
+	  of the prior-stage FDT at primary entry. The original FDT remains
+	  available inside the kernel for read-only hardware provisioning data.
 
 config LUMA_EMBEDDED_DTB
 	string "Device tree embedded by the Luma diagnostic boot"
-	depends on LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
-	default "exynos/google/zumapro-tokay"
+	depends on LUMA_EMBEDDED_DTB_HANDOFF
+	default "exynos/google/zuma-husky"
 	help
 	  Path of the DTB, relative to arch/arm64/boot/dts and without the
-	  .dtb suffix, that LUMA_TOKAY_EMBEDDED_DIAGNOSTIC links into the
-	  kernel, e.g. "exynos/google/zuma-husky" for the Pixel 8 Pro.
+	  .dtb suffix, that LUMA_EMBEDDED_DTB_HANDOFF links into the kernel.
 
 config EFI_STUB
 	bool

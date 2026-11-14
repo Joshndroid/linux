@@ -203,7 +203,7 @@ static void *__init map_fdt(phys_addr_t fdt)
 	phys_addr_t efdt = fdt + MAX_FDT_SIZE;
 	phys_addr_t ptep = (phys_addr_t)ptes; /* We're idmapped when called */
 
-#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+#ifdef CONFIG_LUMA_EMBEDDED_DTB_HANDOFF
 	/*
 	 * The lab FDT lives inside the kernel's existing identity map.
 	 * map_range() does not split an existing block descriptor when

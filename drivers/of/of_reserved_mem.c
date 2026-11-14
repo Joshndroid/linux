@@ -32,7 +32,7 @@ static struct reserved_mem *reserved_mem __refdata = reserved_mem_array;
 static int total_reserved_mem_cnt = MAX_RESERVED_REGIONS;
 static int reserved_mem_count;
 
-#ifdef CONFIG_LUMA_TOKAY_EMBEDDED_DIAGNOSTIC
+#ifdef CONFIG_LUMA_EMBEDDED_DTB_HANDOFF
 /* The embedded FDT is in init memory. The copied OF tree does not relocate
  * these descriptor names. Run after normal allocation is available, before
  * device initcalls consume the table and before init memory is freed.
@@ -53,7 +53,7 @@ static int __init luma_preserve_reserved_mem_names(void)
 		reserved_mem[i].name = copy;
 		copied++;
 	}
-	pr_info("Luma lab: preserved %d reserved-memory names\n", copied);
+	pr_info("Luma: preserved %d reserved-memory names\n", copied);
 	return 0;
 }
 early_initcall(luma_preserve_reserved_mem_names);

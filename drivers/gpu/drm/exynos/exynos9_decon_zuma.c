@@ -33,156 +33,6 @@
 
 #define ZD_MAX_DECON		3
 
-/*
- * DSC configuration for the komodo (google,gs-km4) panel: dual DSC, two
- * 672x34 slices, 8.0 bpp, taken verbatim from the vendor panel's
- * drm_dsc_config (wqhd_pps_config). The bootloader programs the panel's DSC
- * decoder from these same parameters, so the DECON encoder PPS must match.
- *
- * This is hardcoded for the single zuma DSI panel wired today (komodo). The
- * mainline-clean path is for the panel/connector to advertise its
- * drm_dsc_config and the DECON to read it; that is a follow-up.
- */
-static const struct drm_dsc_config komodo_wqhd_dsc = {
-	.line_buf_depth = 9,
-	.bits_per_component = 8,
-	.convert_rgb = true,
-	.slice_width = 672,
-	.slice_height = 34,
-	.slice_count = 2,
-	.simple_422 = false,
-	.pic_width = 1344,
-	.pic_height = 2992,
-	.rc_tgt_offset_high = 3,
-	.rc_tgt_offset_low = 3,
-	.bits_per_pixel = 128,
-	.rc_edge_factor = 6,
-	.rc_quant_incr_limit1 = 11,
-	.rc_quant_incr_limit0 = 11,
-	.initial_xmit_delay = 512,
-	.initial_dec_delay = 592,
-	.block_pred_enable = true,
-	.first_line_bpg_offset = 12,
-	.initial_offset = 6144,
-	.rc_buf_thresh = {
-		14, 28, 42, 56, 70, 84, 98, 105,
-		112, 119, 121, 123, 125, 126
-	},
-	.rc_range_params = {
-		{ 0, 4, 2 }, { 0, 4, 0 }, { 1, 5, 0 }, { 1, 6, 62 },
-		{ 3, 7, 60 }, { 3, 7, 58 }, { 3, 7, 56 }, { 3, 8, 56 },
-		{ 3, 9, 56 }, { 3, 10, 54 }, { 5, 11, 54 }, { 5, 12, 52 },
-		{ 5, 13, 52 }, { 7, 13, 52 }, { 13, 15, 52 }
-	},
-	.rc_model_size = 8192,
-	.flatness_min_qp = 3,
-	.flatness_max_qp = 12,
-	.initial_scale_value = 32,
-	.scale_decrement_interval = 9,
-	.scale_increment_interval = 932,
-	.nfl_bpg_offset = 745,
-	.slice_bpg_offset = 616,
-	.final_offset = 4336,
-	.vbr_enable = false,
-	.slice_chunk_size = 672,
-	.dsc_version_minor = 2,
-	.dsc_version_major = 1,
-};
-
-/* komodo FHD (1008x2244) DSC; see the panel driver for the shared derivation. */
-static const struct drm_dsc_config komodo_fhd_dsc = {
-	.line_buf_depth = 9,
-	.bits_per_component = 8,
-	.convert_rgb = true,
-	.slice_width = 504,
-	.slice_height = 34,
-	.slice_count = 2,
-	.simple_422 = false,
-	.pic_width = 1008,
-	.pic_height = 2244,
-	.rc_tgt_offset_high = 3,
-	.rc_tgt_offset_low = 3,
-	.bits_per_pixel = 128,
-	.rc_edge_factor = 6,
-	.rc_quant_incr_limit1 = 11,
-	.rc_quant_incr_limit0 = 11,
-	.initial_xmit_delay = 512,
-	.initial_dec_delay = 508,
-	.block_pred_enable = true,
-	.first_line_bpg_offset = 12,
-	.initial_offset = 6144,
-	.rc_buf_thresh = {
-		14, 28, 42, 56, 70, 84, 98, 105,
-		112, 119, 121, 123, 125, 126
-	},
-	.rc_range_params = {
-		{ 0, 4, 2 }, { 0, 4, 0 }, { 1, 5, 0 }, { 1, 6, 62 },
-		{ 3, 7, 60 }, { 3, 7, 58 }, { 3, 7, 56 }, { 3, 8, 56 },
-		{ 3, 9, 56 }, { 3, 10, 54 }, { 5, 11, 54 }, { 5, 12, 52 },
-		{ 5, 13, 52 }, { 7, 13, 52 }, { 13, 15, 52 }
-	},
-	.rc_model_size = 8192,
-	.flatness_min_qp = 3,
-	.flatness_max_qp = 12,
-	.initial_scale_value = 32,
-	.scale_decrement_interval = 7,
-	.scale_increment_interval = 810,
-	.nfl_bpg_offset = 745,
-	.slice_bpg_offset = 821,
-	.final_offset = 4336,
-	.vbr_enable = false,
-	.slice_chunk_size = 504,
-	.dsc_version_minor = 2,
-	.dsc_version_major = 1,
-};
-
-/* tokay TK4C (1080x2424), dual DSC with two 540x101 slices. */
-static const struct drm_dsc_config tokay_tk4c_dsc = {
-	.line_buf_depth = 9,
-	.bits_per_component = 8,
-	.convert_rgb = true,
-	.slice_width = 540,
-	.slice_height = 101,
-	.slice_count = 2,
-	.simple_422 = false,
-	.pic_width = 1080,
-	.pic_height = 2424,
-	.rc_tgt_offset_high = 3,
-	.rc_tgt_offset_low = 3,
-	.bits_per_pixel = 128,
-	.rc_edge_factor = 6,
-	.rc_quant_incr_limit1 = 11,
-	.rc_quant_incr_limit0 = 11,
-	.initial_xmit_delay = 512,
-	.initial_dec_delay = 526,
-	.block_pred_enable = true,
-	.first_line_bpg_offset = 12,
-	.initial_offset = 6144,
-	.rc_buf_thresh = {
-		14, 28, 42, 56, 70, 84, 98, 105,
-		112, 119, 121, 123, 125, 126
-	},
-	.rc_range_params = {
-		{ 0, 4, 2 }, { 0, 4, 0 }, { 1, 5, 0 }, { 1, 6, 62 },
-		{ 3, 7, 60 }, { 3, 7, 58 }, { 3, 7, 56 }, { 3, 8, 56 },
-		{ 3, 9, 56 }, { 3, 10, 54 }, { 5, 11, 54 }, { 5, 12, 52 },
-		{ 5, 13, 52 }, { 7, 13, 52 }, { 13, 15, 52 }
-	},
-	.rc_model_size = 8192,
-	.flatness_min_qp = 3,
-	.flatness_max_qp = 12,
-	.initial_scale_value = 32,
-	.scale_decrement_interval = 7,
-	.scale_increment_interval = 2517,
-	.nfl_bpg_offset = 246,
-	.slice_bpg_offset = 258,
-	.final_offset = 4336,
-	.vbr_enable = false,
-	.slice_chunk_size = 540,
-	.dsc_version_minor = 2,
-	.dsc_version_major = 1,
-};
-
 /* Porter-Duff window functions (WIN_FUNC_CON_0.WIN_FUNC_F) */
 enum {
 	ZD_PD_FUNC_COPY		= 0x1,
@@ -481,27 +331,6 @@ static void zuma_reg_set_data_path(u32 id, enum decon_out_type out_type,
  * (cal_common/exynos_panel.h decon_get_comp_dsc_width):
  *   DIV_ROUND_UP(DIV_ROUND_UP(slice_width * bpc, 8), 6) * 2
  */
-static int zuma_dsc_ds_en = -1;
-module_param_named(dsc_ds_en, zuma_dsc_ds_en, int, 0644);
-MODULE_PARM_DESC(dsc_ds_en, "DSC dual-slice enable (-1 = driver default)");
-
-static int zuma_dsc_sm_ch = -1;
-module_param_named(dsc_sm_ch, zuma_dsc_sm_ch, int, 0644);
-MODULE_PARM_DESC(dsc_sm_ch, "DSC slice-mode-change (-1 = driver default)");
-
-static int zuma_dsc_ctrl0 = ZD_DSC_CONTROL0_BOOT_VALUE;
-module_param_named(dsc_ctrl0, zuma_dsc_ctrl0, int, 0644);
-MODULE_PARM_DESC(dsc_ctrl0, "DSC_CONTROL0 value (bootloader uses 0xE)");
-
-static int zuma_dsc_dec_delay = -1;
-module_param_named(dsc_dec_delay, zuma_dsc_dec_delay, int, 0644);
-MODULE_PARM_DESC(dsc_dec_delay,
-		 "override initial_dec_delay in the encoder PPS (-1 = panel's)");
-
-static bool zuma_dsc_enable = true;
-module_param_named(dsc, zuma_dsc_enable, bool, 0644);
-MODULE_PARM_DESC(dsc, "compress the output when the panel advertises DSC");
-
 static u32 zuma_dsc_comp_width(const struct drm_dsc_config *cfg)
 {
 	u32 slice_px = DIV_ROUND_UP(cfg->slice_width * cfg->bits_per_component,
@@ -533,7 +362,8 @@ static void zuma_reg_dsc_config_control(u32 id, u32 dsc_id, u32 ds_en,
 
 	zuma_reg_dsc_swreset(id, dsc_id);
 
-	writel(zuma_dsc_ctrl0, zd_sub[id] + ZD_DSC_CONTROL0(dsc_id));
+	writel(ZD_DSC_CONTROL0_BOOT_VALUE,
+	       zd_sub[id] + ZD_DSC_CONTROL0(dsc_id));
 
 	writel(ZD_DSC_SWAP(0x0, 0x1, 0x0) | ZD_DSC_DUAL_SLICE_EN_F(ds_en) |
 		       ZD_DSC_SLICE_MODE_CH_F(sm_ch) |
@@ -544,15 +374,7 @@ static void zuma_reg_dsc_config_control(u32 id, u32 dsc_id, u32 ds_en,
 	       zd_sub[id] + ZD_DSC_CONTROL3(dsc_id));
 }
 
-/*
- * Program one DSC encoder's PPS.
- *
- * Each encoder compresses one slice and its PPS describes *that slice* as the
- * picture, so pic_width is the slice width - the panel's own PPS, which the
- * panel driver sends to the DDIC, keeps the full picture width. Taking the
- * panel's config verbatim here left the encoders producing nothing and the
- * DSIM underrunning; the bootloader programs 640 where the panel says 1280.
- */
+/* Program one DSC encoder's PPS for its slice. */
 static void zuma_reg_dsc_set_pps(u32 id, u32 dsc_id,
 				 const struct drm_dsc_config *cfg)
 {
@@ -562,8 +384,6 @@ static void zuma_reg_dsc_set_pps(u32 id, u32 dsc_id,
 	int i;
 
 	enc_cfg.pic_width = cfg->slice_width;
-	if (zuma_dsc_dec_delay >= 0)
-		enc_cfg.initial_dec_delay = zuma_dsc_dec_delay;
 
 	drm_dsc_pps_payload_pack(&pps, &enc_cfg);
 
@@ -575,19 +395,10 @@ static void zuma_reg_dsc_set_pps(u32 id, u32 dsc_id,
 
 static void zuma_reg_set_dsc(u32 id, const struct drm_dsc_config *cfg)
 {
-	/*
-	 * komodo: dsc_count == slice_count == 2, so each encoder handles one
-	 * slice (dual_slice disabled) and the slice-mode-change bit is set.
-	 * Unverified on caiman - the parameters exist to sweep it, since the
-	 * encoders wedge the DECON on the first frame when they disagree with
-	 * the stream and one rung then needs a fresh enable, not a poke.
-	 */
-	u32 ds_en = (zuma_dsc_ds_en >= 0) ? !!zuma_dsc_ds_en : 0;
-	u32 sm_ch = (zuma_dsc_sm_ch >= 0) ? !!zuma_dsc_sm_ch : 1;
 	u32 dsc_id;
 
 	for (dsc_id = 0; dsc_id < cfg->slice_count; dsc_id++) {
-		zuma_reg_dsc_config_control(id, dsc_id, ds_en, sm_ch,
+		zuma_reg_dsc_config_control(id, dsc_id, 0, 1,
 					    cfg->slice_width);
 		zuma_reg_dsc_set_pps(id, dsc_id, cfg);
 	}
@@ -836,12 +647,7 @@ static int zuma_decon_init(struct decon_context *ctx,
 static const struct drm_dsc_config *
 zuma_decon_dsc(const struct decon_config *cfg)
 {
-	static const struct drm_dsc_config *const dscs[] = {
-		&komodo_wqhd_dsc, &komodo_fhd_dsc, &tokay_tk4c_dsc,
-	};
-	unsigned int i;
-
-	if (!(cfg->out_type & DECON_OUT_DSI) || !zuma_dsc_enable)
+	if (!(cfg->out_type & DECON_OUT_DSI))
 		return NULL;
 
 	/*
@@ -854,11 +660,6 @@ zuma_decon_dsc(const struct decon_config *cfg)
 	if (cfg->dsc && cfg->dsc->pic_width == cfg->image_width &&
 	    cfg->dsc->pic_height == cfg->image_height)
 		return cfg->dsc;
-
-	for (i = 0; i < ARRAY_SIZE(dscs); i++)
-		if (cfg->image_width == dscs[i]->pic_width &&
-		    cfg->image_height == dscs[i]->pic_height)
-			return dscs[i];
 
 	return NULL;
 }

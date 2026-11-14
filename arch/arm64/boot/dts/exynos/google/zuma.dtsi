@@ -68,12 +68,12 @@
 
 	/*
 	 * CPU operating points from husky's ECT (the bootloader's table at
-	 * 0x90000000; `luma/husky/tools/ect-decode.py ect.bin --opp` writes these): every
+	 * 0x90000000; decoded from the bootloader ECT): every
 	 * DVFS level of CPUCL0/1/2 inside downstream zuma-cpu.dtsi's exynos-acme
 	 * limits (324-1704, 402-2367, 500-2914 MHz).  ACPM applies the fused,
 	 * ASV-calibrated voltages itself; opp-microvolt only feeds the Energy
 	 * Model.  It is the voltage ACPM applied on one husky (its fvmap in APM
-	 * SRAM, `luma/husky/tools/fvmap-decode.py --opp`): 30-50 mV below ECT
+	 * SRAM, decoded from the ACPM frequency map): 30-50 mV below ECT
 	 * ASV table 2 group 4, which these tables first used.  No single ECT
 	 * group matches (ACPM adds fused margins); other chips differ by a few
 	 * steps, which the Energy Model tolerates.
