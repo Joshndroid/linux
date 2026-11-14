@@ -55,6 +55,19 @@ properties:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: Phandle to the S5910 DCXO clock-buffer SPMI device.
 
+  google,dcxo-on-seq:
+    $ref: /schemas/types.yaml#/definitions/uint32-matrix
+    items:
+      items:
+        - description: S5910 register
+          maximum: 0xffff
+        - description: value written to it
+          maximum: 0xff
+        - description: delay after the write, in milliseconds
+          maximum: 2000
+    description: The S5910 turn-on sequence, applied in order while the CP is
+      held in reset. Board-specific; without it the komodo sequence is used.
+
 required:
   - compatible
   - cp-pwr-gpios
