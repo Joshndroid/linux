@@ -119,7 +119,7 @@ static const struct s2mpg1415_rail s2mpg14_zuma_rails[S2MPG1415_METER_CHANNELS] 
 	{ "VDD_TPU",		0x7, CMT_BUCK_POWER },
 	{ "LLDO2_M",		0x8, CMS_BUCK_POWER },
 	{ "VDD_CPUCL0_M",	0x9, CMS_BUCK_POWER },
-	{ "VDD_CPUCL2_M",	0x2b, DVS_NLDO_POWER_1200mA_ON },
+	{ "VDD_CPUCL2_M",	0x2b, NLDO_POWER_1200mA },
 };
 
 static const struct s2mpg1415_rail s2mpg15_rails[S2MPG1415_METER_CHANNELS] = {
