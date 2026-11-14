@@ -2752,9 +2752,9 @@ dhdpcie_start_host_dev(dhd_bus_t *bus)
 		bus->dev, NULL, 0);
 #endif /* SUPPORT_LINKDOWN_RECOVERY */
 #endif /* CONFIG_ARCH_MSM */
-#ifdef CONFIG_PCI_TEGRA
+#if defined(CONFIG_PCI_TEGRA) && !defined(CONFIG_BCMDHD_BCM4390_FOR_BCM4398)
 	ret = tegra_pcie_pm_resume();
-#endif /* CONFIG_PCI_TEGRA */
+#endif /* CONFIG_PCI_TEGRA && !CONFIG_BCMDHD_BCM4390_FOR_BCM4398 */
 
 	if (ret) {
 		DHD_ERROR(("%s Failed to bring up PCIe link\n", __FUNCTION__));
@@ -2802,9 +2802,9 @@ dhdpcie_stop_host_dev(dhd_bus_t *bus)
 		bus->dev, NULL, 0);
 #endif /* SUPPORT_LINKDOWN_RECOVERY */
 #endif /* CONFIG_ARCH_MSM */
-#ifdef CONFIG_PCI_TEGRA
+#if defined(CONFIG_PCI_TEGRA) && !defined(CONFIG_BCMDHD_BCM4390_FOR_BCM4398)
 	ret = tegra_pcie_pm_suspend();
-#endif /* CONFIG_PCI_TEGRA */
+#endif /* CONFIG_PCI_TEGRA && !CONFIG_BCMDHD_BCM4390_FOR_BCM4398 */
 	if (ret) {
 		DHD_ERROR(("Failed to stop PCIe link\n"));
 		goto done;
