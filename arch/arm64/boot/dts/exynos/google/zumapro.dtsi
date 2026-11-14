@@ -4791,7 +4791,7 @@
 			#interconnect-cells = <1>;
 			status = "disabled";
 		};
-		
+
 		/*
 		 * DPU DMA firewalls. Out of reset (and as the bootloader leaves
 		 * them for its own splash buffer) these block the DPU's DMA to
@@ -4824,7 +4824,7 @@
 			reg = <0x1a4a0000 0x10000>;
 			power-domains = <&pd_mfc>;
 		};
-		
+
 		gpu: gpu@1f000000 {
 			compatible = "google,zuma-mali", "arm,mali-valhall-csf";
 			reg = <0x1f000000 0x480000>;
