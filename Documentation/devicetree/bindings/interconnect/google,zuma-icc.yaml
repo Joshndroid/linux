@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/interconnect/google,zuma-icc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Google Tensor G3 (zuma) memory interconnect
+
+maintainers:
+  - Joshndroid <fmxjoshiewah@gmail.com>
+
+description: |
+  The CPU clusters and the GPU of the Google Tensor G3 vote for the memory
+  (MIF), internal NoC (INT), CPU cluster interconnect (DSU) and DSU bus
+  interface (BCI) buses through the interconnect framework, normally with
+  opp-peak-kBps in their operating points. The provider aggregates the votes
+  per bus and requests the matching minimum frequency from the bus's devfreq
+  device, a samsung,exynos-bus node whose samsung,data-clock-ratio converts
+  bandwidth to frequency.
+
+  Node IDs are in dt-bindings/interconnect/google,zuma.h.
+
+properties:
+  compatible:
+    const: google,zuma-icc
+
+  '#interconnect-cells':
+    const: 1
+
+  google,buses:
+    $ref: /schemas/types.yaml#/definitions/phandle-array
+    items:
+      - description: MIF (memory) bus
+        maxItems: 1
+      - description: DSU (CPU cluster interconnect) bus
+        maxItems: 1
+      - description: INT (internal NoC) bus
+        maxItems: 1
+      - description: BCI (DSU bus interface) bus
+        maxItems: 1
+    description:
+      samsung,exynos-bus nodes that receive the aggregated votes for
+      ZUMA_SLAVE_MIF, ZUMA_SLAVE_DSU, ZUMA_SLAVE_INT and ZUMA_SLAVE_BCI.
+
+required:
+  - compatible
+  - '#interconnect-cells'
+  - google,buses
+
+additionalProperties: false
+
+examples:
+  - |
+    interconnect {
+        compatible = "google,zuma-icc";
+        #interconnect-cells = <1>;
+        google,buses = <&bus_mif>, <&bus_dsu>, <&bus_int>, <&bus_bci>;
+    };
