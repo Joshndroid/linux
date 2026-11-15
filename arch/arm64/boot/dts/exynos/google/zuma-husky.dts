@@ -885,3 +885,24 @@
 		};
 	};
 };
+
+/*
+ * MIF below 1014 MHz saves no measurable power here (quiet idle memory
+ * rails 233 mW with a 1014 MHz floor, 237 mW with 421 MHz), halves the
+ * level changes and gives the first frame after a touch 2.5x the bandwidth.
+ */
+&mif_opp_421 {
+	status = "disabled";
+};
+
+&mif_opp_546 {
+	status = "disabled";
+};
+
+&mif_opp_676 {
+	status = "disabled";
+};
+
+&mif_opp_845 {
+	status = "disabled";
+};
