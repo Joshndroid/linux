@@ -497,6 +497,14 @@ power_off:
 	return ret;
 }
 
+static void ftm5_power_off(void *data)
+{
+	struct ftm5 *ts = data;
+
+	gpiod_set_value_cansleep(ts->reset_gpio, 1);
+	regulator_bulk_disable(ARRAY_SIZE(ts->supplies), ts->supplies);
+}
+
 static int ftm5_probe(struct spi_device *spi)
 {
 	struct device *dev = &spi->dev;
@@ -548,6 +556,13 @@ static int ftm5_probe(struct spi_device *spi)
 	ret = ftm5_start(ts);
 	if (ret)
 		return dev_err_probe(dev, ret, "controller initialisation failed\n");
+	/*
+	 * Power off again on any later failure (the panel follower defers until
+	 * the panel has probed) and on unbind, after the IRQ is released.
+	 */
+	ret = devm_add_action_or_reset(dev, ftm5_power_off, ts);
+	if (ret)
+		return ret;
 
 	ret = devm_request_threaded_irq(dev, spi->irq, NULL, ftm5_irq,
 					IRQF_ONESHOT, "ftm5", ts);
@@ -573,14 +588,6 @@ static int ftm5_probe(struct spi_device *spi)
 	return 0;
 }
 
-static void ftm5_remove(struct spi_device *spi)
-{
-	struct ftm5 *ts = spi_get_drvdata(spi);
-
-	gpiod_set_value_cansleep(ts->reset_gpio, 1);
-	regulator_bulk_disable(ARRAY_SIZE(ts->supplies), ts->supplies);
-}
-
 static const struct of_device_id ftm5_of_match[] = {
 	{ .compatible = "st,ftm5-spi" },
 	{ }
@@ -600,7 +607,6 @@ static struct spi_driver ftm5_driver = {
 	},
 	.id_table = ftm5_spi_ids,
 	.probe = ftm5_probe,
-	.remove = ftm5_remove,
 };
 module_spi_driver(ftm5_driver);
 
