@@ -22,3 +22,13 @@ config INTERCONNECT_EXYNOS_BTS
 	  Interconnect provider for the Samsung Bus Traffic Shaper found in
 	  Google Tensor SoCs. It programs per-master AXI quality of service and
 	  converts aggregate bandwidth constraints into ACPM DVFS clock floors.
+
+config INTERCONNECT_ZUMA
+	tristate "Google Tensor G3 (zuma) memory interconnect driver"
+	depends on INTERCONNECT_SAMSUNG
+	depends on ARM_EXYNOS_BUS_DEVFREQ
+	help
+	  Interconnect provider for the memory (MIF) and CPU cluster
+	  interconnect (DSU) buses of the Google Tensor G3. It aggregates the
+	  CPU and GPU bandwidth votes and passes them to the buses' devfreq
+	  devices as minimum frequencies.
