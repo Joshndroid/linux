@@ -20,6 +20,7 @@
  * (zuma.dtsi, zuma-cpu.dtsi, zuma-rmem.dtsi, zuma-pcie.dtsi).
  */
 
+#include <dt-bindings/interconnect/google,zuma.h>
 #include "zumapro.dtsi"
 
 / {
@@ -53,6 +54,10 @@
 			dynamic-power-coefficient = <757>;
 			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL2>;
 			operating-points-v2 = <&zuma_cpucl2_opp>;
+			interconnects = <&mem_icc ZUMA_MASTER_CPUCL2 &mem_icc ZUMA_SLAVE_MIF>,
+					<&mem_icc ZUMA_MASTER_CPUCL2 &mem_icc ZUMA_SLAVE_DSU>,
+					<&mem_icc ZUMA_MASTER_CPUCL2 &mem_icc ZUMA_SLAVE_INT>,
+					<&mem_icc ZUMA_MASTER_CPUCL2 &mem_icc ZUMA_SLAVE_BCI>;
 		};
 
 		/*
@@ -84,60 +89,70 @@
 
 		opp-324000000 {
 			opp-hz = /bits/ 64 <324000000>;
+			opp-peak-kBps = <8736000 5184000 0 5040000>;
 			opp-microvolt = <531250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-610000000 {
 			opp-hz = /bits/ 64 <610000000>;
+			opp-peak-kBps = <10816000 9760000 0 9200000>;
 			opp-microvolt = <543750>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-820000000 {
 			opp-hz = /bits/ 64 <820000000>;
+			opp-peak-kBps = <13520000 13120000 0 13440000>;
 			opp-microvolt = <587500>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-955000000 {
 			opp-hz = /bits/ 64 <955000000>;
+			opp-peak-kBps = <16224000 15520000 0 16800000>;
 			opp-microvolt = <618750>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1098000000 {
 			opp-hz = /bits/ 64 <1098000000>;
+			opp-peak-kBps = <21632000 17568000 0 16800000>;
 			opp-microvolt = <650000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1197000000 {
 			opp-hz = /bits/ 64 <1197000000>;
+			opp-peak-kBps = <21632000 19152000 0 19280000>;
 			opp-microvolt = <668750>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1328000000 {
 			opp-hz = /bits/ 64 <1328000000>;
+			opp-peak-kBps = <21632000 19152000 0 19280000>;
 			opp-microvolt = <700000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1425000000 {
 			opp-hz = /bits/ 64 <1425000000>;
+			opp-peak-kBps = <21632000 19152000 0 19280000>;
 			opp-microvolt = <737500>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1548000000 {
 			opp-hz = /bits/ 64 <1548000000>;
+			opp-peak-kBps = <21632000 19152000 0 19280000>;
 			opp-microvolt = <775000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1704000000 {
 			opp-hz = /bits/ 64 <1704000000>;
+			opp-peak-kBps = <21632000 19152000 0 19280000>;
 			opp-microvolt = <818750>;
 			clock-latency-ns = <500000>;
 		};
@@ -149,90 +164,105 @@
 
 		opp-402000000 {
 			opp-hz = /bits/ 64 <402000000>;
+			opp-peak-kBps = <8736000 5184000 0 5040000>;
 			opp-microvolt = <531250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-578000000 {
 			opp-hz = /bits/ 64 <578000000>;
+			opp-peak-kBps = <10816000 9760000 0 9200000>;
 			opp-microvolt = <537500>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-697000000 {
 			opp-hz = /bits/ 64 <697000000>;
+			opp-peak-kBps = <13520000 9760000 0 9200000>;
 			opp-microvolt = <550000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-712000000 {
 			opp-hz = /bits/ 64 <712000000>;
+			opp-peak-kBps = <16224000 9760000 0 9200000>;
 			opp-microvolt = <556250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-910000000 {
 			opp-hz = /bits/ 64 <910000000>;
+			opp-peak-kBps = <16224000 13120000 0 13440000>;
 			opp-microvolt = <593750>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1065000000 {
 			opp-hz = /bits/ 64 <1065000000>;
+			opp-peak-kBps = <21632000 15520000 0 16800000>;
 			opp-microvolt = <618750>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1221000000 {
 			opp-hz = /bits/ 64 <1221000000>;
+			opp-peak-kBps = <21632000 15520000 0 16800000>;
 			opp-microvolt = <650000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1328000000 {
 			opp-hz = /bits/ 64 <1328000000>;
+			opp-peak-kBps = <24624000 15520000 0 16800000>;
 			opp-microvolt = <681250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1418000000 {
 			opp-hz = /bits/ 64 <1418000000>;
+			opp-peak-kBps = <24624000 15520000 0 16800000>;
 			opp-microvolt = <700000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1572000000 {
 			opp-hz = /bits/ 64 <1572000000>;
+			opp-peak-kBps = <27456000 15520000 0 16800000>;
 			opp-microvolt = <750000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1836000000 {
 			opp-hz = /bits/ 64 <1836000000>;
+			opp-peak-kBps = <50752000 17568000 8528000 16800000>;
 			opp-microvolt = <831250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1945000000 {
 			opp-hz = /bits/ 64 <1945000000>;
+			opp-peak-kBps = <50752000 19152000 8528000 19280000>;
 			opp-microvolt = <881250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2130000000 {
 			opp-hz = /bits/ 64 <2130000000>;
+			opp-peak-kBps = <59904000 23104000 10624000 19280000>;
 			opp-microvolt = <956250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2245000000 {
 			opp-hz = /bits/ 64 <2245000000>;
+			opp-peak-kBps = <59904000 23104000 10624000 19280000>;
 			opp-microvolt = <1025000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2367000000 {
 			opp-hz = /bits/ 64 <2367000000>;
+			opp-peak-kBps = <59904000 23104000 10624000 19280000>;
 			opp-microvolt = <1093750>;
 			clock-latency-ns = <500000>;
 		};
@@ -244,93 +274,305 @@
 
 		opp-500000000 {
 			opp-hz = /bits/ 64 <500000000>;
+			opp-peak-kBps = <8736000 5184000 0 5040000>;
 			opp-microvolt = <512500>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-880000000 {
 			opp-hz = /bits/ 64 <880000000>;
+			opp-peak-kBps = <10816000 9760000 0 9200000>;
 			opp-microvolt = <562500>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1164000000 {
 			opp-hz = /bits/ 64 <1164000000>;
+			opp-peak-kBps = <13520000 13120000 0 13440000>;
 			opp-microvolt = <606250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1298000000 {
 			opp-hz = /bits/ 64 <1298000000>;
+			opp-peak-kBps = <16224000 15520000 0 16800000>;
 			opp-microvolt = <618750>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1557000000 {
 			opp-hz = /bits/ 64 <1557000000>;
+			opp-peak-kBps = <21632000 15520000 0 16800000>;
 			opp-microvolt = <668750>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1745000000 {
 			opp-hz = /bits/ 64 <1745000000>;
+			opp-peak-kBps = <27456000 15520000 0 16800000>;
 			opp-microvolt = <706250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-1885000000 {
 			opp-hz = /bits/ 64 <1885000000>;
+			opp-peak-kBps = <27456000 17568000 0 16800000>;
 			opp-microvolt = <750000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2049000000 {
 			opp-hz = /bits/ 64 <2049000000>;
+			opp-peak-kBps = <32448000 17568000 0 16800000>;
 			opp-microvolt = <787500>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2147000000 {
 			opp-hz = /bits/ 64 <2147000000>;
+			opp-peak-kBps = <50752000 19152000 8528000 19280000>;
 			opp-microvolt = <812500>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2294000000 {
 			opp-hz = /bits/ 64 <2294000000>;
+			opp-peak-kBps = <50752000 19152000 8528000 19280000>;
 			opp-microvolt = <850000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2363000000 {
 			opp-hz = /bits/ 64 <2363000000>;
+			opp-peak-kBps = <50752000 23104000 8528000 19280000>;
 			opp-microvolt = <868750>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2556000000 {
 			opp-hz = /bits/ 64 <2556000000>;
+			opp-peak-kBps = <50752000 23104000 8528000 19280000>;
 			opp-microvolt = <937500>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2687000000 {
 			opp-hz = /bits/ 64 <2687000000>;
+			opp-peak-kBps = <59904000 23104000 10624000 19280000>;
 			opp-microvolt = <1000000>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2850000000 {
 			opp-hz = /bits/ 64 <2850000000>;
+			opp-peak-kBps = <59904000 27264000 10624000 22416000>;
 			opp-microvolt = <1081250>;
 			clock-latency-ns = <500000>;
 		};
 
 		opp-2914000000 {
 			opp-hz = /bits/ 64 <2914000000>;
+			opp-peak-kBps = <59904000 27264000 10624000 22416000>;
 			opp-microvolt = <1137500>;
 			clock-latency-ns = <500000>;
 		};
+	};
+
+	/*
+	 * Memory (MIF), internal NoC (INT), CPU cluster interconnect (DSU) and
+	 * DSU bus interface (BCI) scaling. The CPU clusters and the GPU vote
+	 * through the opp-peak-kBps of their operating points, one path per
+	 * bus (MIF, DSU, INT, BCI for a CPU; MIF, INT for the GPU); zuma-icc
+	 * sums the votes per bus and asks the bus's devfreq for the lowest
+	 * level that carries them.
+	 *
+	 * Levels are the ones ACPM accepts (read back exactly in a sweep).
+	 * The votes come from the downstream tables (android-gs-shusky-6.1:
+	 * zuma-b0.dtsi gs_memlat_cl* and gs_dsulat_cl* for CPU -> MIF/DSU,
+	 * zuma-gpu.dtsi gpu_dvfs_table_v2 "mif min" for GPU -> MIF), with the
+	 * INT and BCI votes derived from those through zuma.dtsi devfreq_mif
+	 * mif_int_map and zuma-b0.dtsi bci_freq. A vote is frequency *
+	 * samsung,data-clock-ratio: 16 bytes per MIF clock (downstream BTS bus
+	 * width), the same scale on the other buses, whose votes are latency
+	 * floors rather than bandwidth. The lowest INT level is the 356 MHz
+	 * the bootloader leaves it at.
+	 */
+	bus_mif: bus-mif {
+		compatible = "samsung,exynos-bus";
+		clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_MIF>;
+		clock-names = "bus";
+		operating-points-v2 = <&bus_mif_opp_table>;
+		samsung,data-clock-ratio = <16>;
+
+		bus_mif_opp_table: opp-table {
+			compatible = "operating-points-v2";
+
+			mif_opp_421: opp-421000000 {
+				opp-hz = /bits/ 64 <421000000>;
+			};
+
+			mif_opp_546: opp-546000000 {
+				opp-hz = /bits/ 64 <546000000>;
+			};
+
+			mif_opp_676: opp-676000000 {
+				opp-hz = /bits/ 64 <676000000>;
+			};
+
+			mif_opp_845: opp-845000000 {
+				opp-hz = /bits/ 64 <845000000>;
+			};
+
+			mif_opp_1014: opp-1014000000 {
+				opp-hz = /bits/ 64 <1014000000>;
+			};
+
+			mif_opp_1352: opp-1352000000 {
+				opp-hz = /bits/ 64 <1352000000>;
+			};
+
+			mif_opp_1539: opp-1539000000 {
+				opp-hz = /bits/ 64 <1539000000>;
+			};
+
+			mif_opp_1716: opp-1716000000 {
+				opp-hz = /bits/ 64 <1716000000>;
+			};
+
+			mif_opp_2028: opp-2028000000 {
+				opp-hz = /bits/ 64 <2028000000>;
+			};
+
+			mif_opp_2288: opp-2288000000 {
+				opp-hz = /bits/ 64 <2288000000>;
+			};
+
+			mif_opp_2730: opp-2730000000 {
+				opp-hz = /bits/ 64 <2730000000>;
+			};
+
+			mif_opp_3172: opp-3172000000 {
+				opp-hz = /bits/ 64 <3172000000>;
+			};
+
+			mif_opp_3744: opp-3744000000 {
+				opp-hz = /bits/ 64 <3744000000>;
+			};
+		};
+	};
+
+	bus_int: bus-int {
+		compatible = "samsung,exynos-bus";
+		clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_INT>;
+		clock-names = "bus";
+		operating-points-v2 = <&bus_int_opp_table>;
+		samsung,data-clock-ratio = <16>;
+
+		bus_int_opp_table: opp-table {
+			compatible = "operating-points-v2";
+
+			int_opp_356: opp-356000000 {
+				opp-hz = /bits/ 64 <356000000>;
+			};
+
+			int_opp_533: opp-533000000 {
+				opp-hz = /bits/ 64 <533000000>;
+			};
+
+			int_opp_664: opp-664000000 {
+				opp-hz = /bits/ 64 <664000000>;
+			};
+		};
+	};
+
+	bus_dsu: bus-dsu {
+		compatible = "samsung,exynos-bus";
+		clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_DSU>;
+		clock-names = "bus";
+		operating-points-v2 = <&bus_dsu_opp_table>;
+		samsung,data-clock-ratio = <16>;
+
+		bus_dsu_opp_table: opp-table {
+			compatible = "operating-points-v2";
+
+			dsu_opp_324: opp-324000000 {
+				opp-hz = /bits/ 64 <324000000>;
+			};
+
+			dsu_opp_610: opp-610000000 {
+				opp-hz = /bits/ 64 <610000000>;
+			};
+
+			dsu_opp_820: opp-820000000 {
+				opp-hz = /bits/ 64 <820000000>;
+			};
+
+			dsu_opp_970: opp-970000000 {
+				opp-hz = /bits/ 64 <970000000>;
+			};
+
+			dsu_opp_1098: opp-1098000000 {
+				opp-hz = /bits/ 64 <1098000000>;
+			};
+
+			dsu_opp_1197: opp-1197000000 {
+				opp-hz = /bits/ 64 <1197000000>;
+			};
+
+			dsu_opp_1444: opp-1444000000 {
+				opp-hz = /bits/ 64 <1444000000>;
+			};
+
+			dsu_opp_1548: opp-1548000000 {
+				opp-hz = /bits/ 64 <1548000000>;
+			};
+
+			dsu_opp_1704: opp-1704000000 {
+				opp-hz = /bits/ 64 <1704000000>;
+			};
+		};
+	};
+
+	bus_bci: bus-bci {
+		compatible = "samsung,exynos-bus";
+		clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_BCI>;
+		clock-names = "bus";
+		operating-points-v2 = <&bus_bci_opp_table>;
+		samsung,data-clock-ratio = <16>;
+
+		bus_bci_opp_table: opp-table {
+			compatible = "operating-points-v2";
+
+			bci_opp_315: opp-315000000 {
+				opp-hz = /bits/ 64 <315000000>;
+			};
+
+			bci_opp_575: opp-575000000 {
+				opp-hz = /bits/ 64 <575000000>;
+			};
+
+			bci_opp_840: opp-840000000 {
+				opp-hz = /bits/ 64 <840000000>;
+			};
+
+			bci_opp_1050: opp-1050000000 {
+				opp-hz = /bits/ 64 <1050000000>;
+			};
+
+			bci_opp_1205: opp-1205000000 {
+				opp-hz = /bits/ 64 <1205000000>;
+			};
+
+			bci_opp_1401: opp-1401000000 {
+				opp-hz = /bits/ 64 <1401000000>;
+			};
+		};
+	};
+
+	mem_icc: interconnect {
+		compatible = "google,zuma-icc";
+		#interconnect-cells = <1>;
+		google,buses = <&bus_mif>, <&bus_dsu>, <&bus_int>, <&bus_bci>;
 	};
 
 	pmu-0 {
@@ -379,6 +621,10 @@
 	compatible = "arm,cortex-a510";
 	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
 	operating-points-v2 = <&zuma_cpucl0_opp>;
+	interconnects = <&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_MIF>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_DSU>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_INT>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_BCI>;
 	capacity-dmips-mhz = <193>;
 	dynamic-power-coefficient = <70>;
 };
@@ -387,6 +633,10 @@
 	compatible = "arm,cortex-a510";
 	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
 	operating-points-v2 = <&zuma_cpucl0_opp>;
+	interconnects = <&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_MIF>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_DSU>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_INT>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_BCI>;
 	capacity-dmips-mhz = <193>;
 	dynamic-power-coefficient = <70>;
 };
@@ -395,6 +645,10 @@
 	compatible = "arm,cortex-a510";
 	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
 	operating-points-v2 = <&zuma_cpucl0_opp>;
+	interconnects = <&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_MIF>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_DSU>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_INT>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_BCI>;
 	capacity-dmips-mhz = <193>;
 	dynamic-power-coefficient = <70>;
 };
@@ -403,6 +657,10 @@
 	compatible = "arm,cortex-a510";
 	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
 	operating-points-v2 = <&zuma_cpucl0_opp>;
+	interconnects = <&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_MIF>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_DSU>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_INT>,
+			<&mem_icc ZUMA_MASTER_CPUCL0 &mem_icc ZUMA_SLAVE_BCI>;
 	capacity-dmips-mhz = <193>;
 	dynamic-power-coefficient = <70>;
 };
@@ -411,6 +669,10 @@
 	compatible = "arm,cortex-a715";
 	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
 	operating-points-v2 = <&zuma_cpucl1_opp>;
+	interconnects = <&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_MIF>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_DSU>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_INT>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_BCI>;
 	capacity-dmips-mhz = <927>;
 	dynamic-power-coefficient = <513>;
 };
@@ -419,6 +681,10 @@
 	compatible = "arm,cortex-a715";
 	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
 	operating-points-v2 = <&zuma_cpucl1_opp>;
+	interconnects = <&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_MIF>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_DSU>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_INT>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_BCI>;
 	capacity-dmips-mhz = <927>;
 	dynamic-power-coefficient = <513>;
 };
@@ -427,6 +693,10 @@
 	compatible = "arm,cortex-a715";
 	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
 	operating-points-v2 = <&zuma_cpucl1_opp>;
+	interconnects = <&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_MIF>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_DSU>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_INT>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_BCI>;
 	cpu-idle-states = <&hunter_cpu_sleep>;
 	capacity-dmips-mhz = <927>;
 	dynamic-power-coefficient = <513>;
@@ -437,6 +707,10 @@
 	compatible = "arm,cortex-a715";
 	clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
 	operating-points-v2 = <&zuma_cpucl1_opp>;
+	interconnects = <&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_MIF>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_DSU>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_INT>,
+			<&mem_icc ZUMA_MASTER_CPUCL1 &mem_icc ZUMA_SLAVE_BCI>;
 	/delete-property/ #cooling-cells;
 	cpu-idle-states = <&hunter_cpu_sleep>;
 	capacity-dmips-mhz = <927>;
@@ -560,58 +834,76 @@
  * run 1.4-2.1x zumapro's glmark2 figures, which its own note calls
  * understated; the G3D_L2 rail (~40 mW) is still not included.
  */
+&gpu {
+	interconnects = <&mem_icc ZUMA_MASTER_G3D &mem_icc ZUMA_SLAVE_MIF>,
+			<&mem_icc ZUMA_MASTER_G3D &mem_icc ZUMA_SLAVE_INT>;
+};
+
 &gpu_opp_table {
 	/delete-node/ opp-940000000;
 
 	opp-150000000 {
+		opp-peak-kBps = <0 0>;
 		opp-microwatt = <200000>;
 	};
 
 	opp-302000000 {
+		opp-peak-kBps = <0 0>;
 		opp-microwatt = <300000>;
 	};
 
 	opp-337000000 {
+		opp-peak-kBps = <0 0>;
 		opp-microwatt = <350000>;
 	};
 
 	opp-376000000 {
+		opp-peak-kBps = <0 0>;
 		opp-microwatt = <400000>;
 	};
 
 	opp-419000000 {
+		opp-peak-kBps = <0 0>;
 		opp-microwatt = <440000>;
 	};
 
 	opp-467000000 {
+		opp-peak-kBps = <13520000 0>;
 		opp-microwatt = <520000>;
 	};
 
 	opp-521000000 {
+		opp-peak-kBps = <13520000 0>;
 		opp-microwatt = <580000>;
 	};
 
 	opp-580000000 {
+		opp-peak-kBps = <21632000 0>;
 		opp-microwatt = <650000>;
 	};
 
 	opp-649000000 {
+		opp-peak-kBps = <21632000 0>;
 		opp-microwatt = <750000>;
 	};
 
 	opp-723000000 {
+		opp-peak-kBps = <21632000 0>;
 		opp-microwatt = <880000>;
 	};
 
 	opp-807000000 {
+		opp-peak-kBps = <27456000 0>;
 		opp-microwatt = <1110000>;
 	};
 
 	opp-850000000 {
+		opp-peak-kBps = <27456000 0>;
 		opp-microwatt = <1180000>;
 	};
 
 	opp-890000000 {
+		opp-peak-kBps = <50752000 8528000>;
 		opp-microwatt = <1300000>;
 	};
 };
