@@ -690,6 +690,12 @@
 		interrupts = <0 IRQ_TYPE_LEVEL_HIGH>;
 		wakeup-source;
 
+		gpio {
+			compatible = "samsung,s2mpg14-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+		};
+
 		regulators {
 			m_ldo14_reg: ldo14m {
 				/* no voltage constraint: keep the bootloader's level */
@@ -737,6 +743,12 @@
 		interrupt-parent = <&vgpio2ap>;
 		interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
 		wakeup-source;
+
+		gpio {
+			compatible = "samsung,s2mpg15-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+		};
 
 		regulators {
 			s_bucka_reg: bucka {
