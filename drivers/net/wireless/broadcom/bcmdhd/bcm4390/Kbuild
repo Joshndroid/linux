@@ -722,6 +722,12 @@ DHDCFLAGS += -DIPV6_NDO_SUPPORT
 
 # Early suspend
 DHDCFLAGS += -DDHD_USE_EARLYSUSPEND
+# Mainline has no early suspend and Luma no Android framework to send
+# SETSUSPENDMODE: apply the suspend settings (ARP offload, multicast off,
+# packet filters) from the PM notifier, and filter everything but unicast
+# while suspended so broadcast traffic does not wake the host.
+DHDCFLAGS += -DDHD_USE_PM_SLEEP
+DHDCFLAGS += -DPKT_FILTER_SUPPORT
 
 # For Scan result patch
 DHDCFLAGS += -DESCAN_RESULT_PATCH

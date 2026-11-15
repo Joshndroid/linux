@@ -1397,8 +1397,13 @@ dhd_pm_callback(struct notifier_block *nfb, unsigned long action, void *ignored)
 	}
 
 #if defined(DHD_USE_PM_SLEEP)
-	/* The resume setting is handled in wl_android_set_suspendmode(). */
-	if (suspend == TRUE) {
+	/*
+	 * Android also removes the settings with SETSUSPENDMODE 0 from
+	 * wl_android_set_suspendmode(); without that framework nothing would,
+	 * and the host would stay filtered after resume. Remove them here.
+	 */
+	if (action == PM_SUSPEND_PREPARE || action == PM_HIBERNATION_PREPARE ||
+	    action == PM_POST_SUSPEND || action == PM_POST_HIBERNATION) {
 		dhd_suspend_resume_helper(dhdinfo, suspend, 0);
 	}
 #endif /* DHD_USE_PM_SLEEP */
