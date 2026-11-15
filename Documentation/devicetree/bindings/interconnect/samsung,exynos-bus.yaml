@@ -180,7 +180,8 @@ properties:
     maxItems: 4
     description:
       Devfreq-event device to monitor the current utilization of buses. Valid
-      and required only for the parent bus devices.
+      only for the parent bus devices. A parent bus without them runs at the
+      lowest frequency its interconnect consumers request.
 
   exynos,saturation-ratio:
     $ref: /schemas/types.yaml#/definitions/uint32
@@ -208,7 +209,8 @@ properties:
 
   vdd-supply:
     description:
-      Main bus power rail. Valid and required only for the parent bus devices.
+      Main bus power rail. Valid only for the parent bus devices; omitted when
+      firmware sets the bus voltage together with its clock.
 
 required:
   - compatible

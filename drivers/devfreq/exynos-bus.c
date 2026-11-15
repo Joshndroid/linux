@@ -179,13 +179,26 @@ static int exynos_bus_parent_parse_of(struct device_node *np,
 	const char *supplies[] = { "vdd", NULL };
 	int i, ret, count, size;
 
-	ret = dev_pm_opp_set_regulators(dev, supplies);
-	if (ret < 0) {
-		dev_err(dev, "failed to set regulators %d\n", ret);
-		return ret;
+	/*
+	 * A bus whose voltage follows its clock in firmware has no supply of
+	 * its own to scale.
+	 */
+	if (of_property_present(np, "vdd-supply")) {
+		ret = dev_pm_opp_set_regulators(dev, supplies);
+		if (ret < 0) {
+			dev_err(dev, "failed to set regulators %d\n", ret);
+			return ret;
+		}
+
+		bus->opp_token = ret;
 	}
 
-	bus->opp_token = ret;
+	/*
+	 * A bus without devfreq-event devices is scaled only by the
+	 * frequency requests of its interconnect consumers.
+	 */
+	if (!of_property_present(np, "devfreq-events"))
+		return 0;
 
 	/*
 	 * Get the devfreq-event devices to get the current utilization of
@@ -283,10 +296,28 @@ static int exynos_bus_profile_init(struct exynos_bus *bus,
 	int ret;
 
 	/* Initialize the struct profile and governor data for parent device */
-	profile->polling_ms = 50;
 	profile->target = exynos_bus_target;
-	profile->get_dev_status = exynos_bus_get_dev_status;
 	profile->exit = exynos_bus_exit;
+
+	/*
+	 * Without devfreq-event devices there is no utilization to sample:
+	 * run at the lowest frequency the PM QoS minimum requests (from the
+	 * interconnect provider) allow.
+	 */
+	if (!bus->edev_count) {
+		bus->devfreq = devm_devfreq_add_device(dev, profile,
+						       DEVFREQ_GOV_POWERSAVE,
+						       NULL);
+		if (IS_ERR(bus->devfreq)) {
+			dev_err(dev, "failed to add devfreq device\n");
+			return PTR_ERR(bus->devfreq);
+		}
+
+		return 0;
+	}
+
+	profile->polling_ms = 50;
+	profile->get_dev_status = exynos_bus_get_dev_status;
 
 	ondemand_data = devm_kzalloc(dev, sizeof(*ondemand_data), GFP_KERNEL);
 	if (!ondemand_data)
