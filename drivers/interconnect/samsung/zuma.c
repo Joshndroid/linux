@@ -17,6 +17,7 @@
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_qos.h>
+#include <linux/workqueue.h>
 
 #include <dt-bindings/interconnect/google,zuma.h>
 
@@ -26,6 +27,8 @@
 struct zuma_icc_bus {
 	struct device *dev;
 	struct dev_pm_qos_request qos_req;
+	struct work_struct qos_work;
+	s32 qos_freq;		/* kHz, written under the icc locks */
 	u32 bus_clk_ratio;
 };
 
@@ -65,24 +68,37 @@ static const struct {
 	{ ZUMA_MASTER_CPUCL2, ZUMA_SLAVE_BCI },
 };
 
+static void zuma_icc_qos_work(struct work_struct *work)
+{
+	struct zuma_icc_bus *bus = container_of(work, struct zuma_icc_bus,
+						qos_work);
+	int ret;
+
+	ret = dev_pm_qos_update_request(&bus->qos_req, READ_ONCE(bus->qos_freq));
+	if (ret < 0)
+		dev_err_ratelimited(bus->dev, "failed to update PM QoS: %d\n",
+				    ret);
+}
+
+/*
+ * Called with the interconnect locks held. A consumer can vote from inside
+ * a PM QoS notifier (the GPU's devfreq runs its target, and with it the OPP
+ * core's icc_set_bw(), under dev_pm_qos_mtx when its min/max frequency or
+ * thermal limit changes), so the bus's PM QoS request must not be updated
+ * from here: that would invert dev_pm_qos_mtx and the interconnect locks.
+ * Record the frequency and apply it from a work item.
+ */
 static int zuma_icc_set(struct icc_node *src, struct icc_node *dst)
 {
 	struct zuma_icc_bus *bus = dst->data;
-	s32 freq;
-	int ret;
 
 	/* Only the slave (bus) nodes carry a bus. */
 	if (!bus)
 		return 0;
 
-	freq = max(dst->avg_bw, dst->peak_bw) / bus->bus_clk_ratio;
-
-	ret = dev_pm_qos_update_request(&bus->qos_req, freq);
-	if (ret < 0) {
-		dev_err(dst->provider->dev, "failed to update PM QoS of %s\n",
-			dst->name);
-		return ret;
-	}
+	WRITE_ONCE(bus->qos_freq,
+		   max(dst->avg_bw, dst->peak_bw) / bus->bus_clk_ratio);
+	queue_work(system_highpri_wq, &bus->qos_work);
 
 	return 0;
 }
@@ -105,6 +121,7 @@ static void zuma_icc_put_buses(struct zuma_icc *icc)
 	for (i = 0; i < ZUMA_NUM_SLAVES; i++) {
 		if (!icc->buses[i].dev)
 			continue;
+		cancel_work_sync(&icc->buses[i].qos_work);
 		if (dev_pm_qos_request_active(&icc->buses[i].qos_req))
 			dev_pm_qos_remove_request(&icc->buses[i].qos_req);
 		put_device(icc->buses[i].dev);
@@ -121,6 +138,7 @@ static int zuma_icc_get_buses(struct device *dev, struct zuma_icc *icc)
 
 	for (i = 0; i < ZUMA_NUM_SLAVES; i++) {
 		bus = &icc->buses[i];
+		INIT_WORK(&bus->qos_work, zuma_icc_qos_work);
 
 		np = of_parse_phandle(dev->of_node, "google,buses", i);
 		if (!np)
