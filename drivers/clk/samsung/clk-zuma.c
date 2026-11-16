@@ -17,7 +17,7 @@
 #include "clk-pll.h"
 
 /* NOTE: Must be equal to the last clock ID increased by one */
-#define CLKS_NR_TOP	(CLK_GOUT_CMU_DFTMUX_CIS_CLK3 + 1)
+#define CLKS_NR_TOP	(CLK_GOUT_CMU_DFTMUX_CIS_CLK2 + 1)
 #define CLKS_NR_APM	(CLK_APM_PLL_DIV16_APM + 1)
 #define CLKS_NR_DPU	(CLK_MOUT_DPU_DSIM_USER + 1)
 #define CLKS_NR_HSI0	(CLK_DOUT_HSI0_USB + 1)
@@ -1149,6 +1149,10 @@ static const struct samsung_gate_clock top_gate_clks[] __initconst = {
 	     CLK_GATE_SAMSUNG_MANUAL),
 	GATE(CLK_GOUT_CMU_DFTMUX_CIS_CLK3, "gout_cmu_dftmux_cis_clk3",
 	     "dout_cmu_cis_clk3", DMYQCH_CON_DFTMUX_CMU_QCH_CIS_CLK3,
+	     1, CLK_SET_RATE_PARENT,
+	     CLK_GATE_SAMSUNG_MANUAL),
+	GATE(CLK_GOUT_CMU_DFTMUX_CIS_CLK2, "gout_cmu_dftmux_cis_clk2",
+	     "dout_cmu_cis_clk2", DMYQCH_CON_DFTMUX_CMU_QCH_CIS_CLK2,
 	     1, CLK_SET_RATE_PARENT,
 	     CLK_GATE_SAMSUNG_MANUAL),
 };
