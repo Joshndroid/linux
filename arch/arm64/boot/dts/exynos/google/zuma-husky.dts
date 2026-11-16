@@ -744,7 +744,7 @@
 		interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
 		wakeup-source;
 
-		gpio {
+		s2mpg15_gpio: gpio {
 			compatible = "samsung,s2mpg15-gpio";
 			gpio-controller;
 			#gpio-cells = <2>;
@@ -781,6 +781,115 @@
 			s_ldo7_reg: ldo7s {
 				regulator-name = "L7S_SENSORS";
 				regulator-always-on;
+			};
+
+			/*
+			 * Camera rails (downstream zuma-shusky-pmic.dtsi and
+			 * zuma-husky-camera.dtsi): L12S_CAMIO 1.85 V, the
+			 * modules' I/O supply, and L26S_LDAF 3.3 V, the front
+			 * sensor's analogue supply and the rear laser AF's.
+			 */
+			s_ldo12_reg: ldo12s {
+				regulator-name = "L12S_CAMIO";
+				regulator-min-microvolt = <1850000>;
+				regulator-max-microvolt = <1850000>;
+			};
+
+			s_ldo26_reg: ldo26s {
+				regulator-name = "L26S_LDAF";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+			};
+		};
+	};
+};
+
+/*
+ * Camera PMIC: a Dialog SLG51002 on HSI2C14, address 0x75 (downstream
+ * zuma-ripcurrent-camera-pmic.dtsi, voltages from zuma-husky-camera.dtsi).
+ * s2mpg15 GPIO0 is its chip select, GPIO1 and GPIO3 enable the buck-boost
+ * and buck that feed its LDOs. Its GPIO1..4 outputs are load-switch enables
+ * for the camera modules.
+ */
+&usi14 {
+	samsung,mode = <USI_MODE_I2C>;
+	status = "okay";
+};
+
+&hsi2c_14 {
+	clock-frequency = <390000>;
+	status = "okay";
+
+	pmic@75 {
+		compatible = "dlg,slg51002";
+		reg = <0x75>;
+		dlg,cs-gpios = <&s2mpg15_gpio 0 GPIO_ACTIVE_HIGH>;
+		dlg,bb-gpios = <&s2mpg15_gpio 1 GPIO_ACTIVE_HIGH>;
+		dlg,buck-gpios = <&s2mpg15_gpio 3 GPIO_ACTIVE_HIGH>;
+
+		regulators {
+			slg51002_ldo1: ldo1 {
+				regulator-name = "CAM_LDO1";
+				regulator-min-microvolt = <2250000>;
+				regulator-max-microvolt = <2250000>;
+			};
+
+			slg51002_ldo2: ldo2 {
+				regulator-name = "CAM_LDO2";
+				regulator-min-microvolt = <2950000>;
+				regulator-max-microvolt = <2950000>;
+			};
+
+			slg51002_ldo3: ldo3 {
+				regulator-name = "CAM_LDO3";
+				regulator-min-microvolt = <2250000>;
+				regulator-max-microvolt = <2250000>;
+			};
+
+			slg51002_ldo4: ldo4 {
+				regulator-name = "CAM_LDO4";
+				regulator-min-microvolt = <2950000>;
+				regulator-max-microvolt = <2950000>;
+			};
+
+			slg51002_ldo5: ldo5 {
+				regulator-name = "CAM_LDO5";
+				regulator-min-microvolt = <2900000>;
+				regulator-max-microvolt = <2900000>;
+			};
+
+			slg51002_ldo6: ldo6 {
+				regulator-name = "CAM_LDO6";
+				regulator-min-microvolt = <1100000>;
+				regulator-max-microvolt = <1100000>;
+			};
+
+			slg51002_ldo7: ldo7 {
+				regulator-name = "CAM_LDO7";
+				regulator-min-microvolt = <1060000>;
+				regulator-max-microvolt = <1060000>;
+			};
+
+			slg51002_ldo8: ldo8 {
+				regulator-name = "CAM_LDO8";
+				regulator-min-microvolt = <970000>;
+				regulator-max-microvolt = <970000>;
+			};
+
+			slg51002_gpio1: gpio1 {
+				regulator-name = "CAM_GPIO1";
+			};
+
+			slg51002_gpio2: gpio2 {
+				regulator-name = "CAM_GPIO2";
+			};
+
+			slg51002_gpio3: gpio3 {
+				regulator-name = "CAM_GPIO3";
+			};
+
+			slg51002_gpio4: gpio4 {
+				regulator-name = "CAM_GPIO4";
 			};
 		};
 	};
