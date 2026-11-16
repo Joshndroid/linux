@@ -1811,6 +1811,12 @@ S2MPG10_VOLTAGE_RANGE(s2mpg15_ldo, 9, 725000, 725000, 1512500, STEP_12_5_MV);
 /* voltage range for s2mpg15 LDO 10, 11 */
 S2MPG10_VOLTAGE_RANGE(s2mpg15_ldo, 10, 700000, 700000, 2275000, STEP_25_MV);
 
+/*
+ * voltage range for s2mpg15 LDO 5, 6, 8, 15, 16, 18, 25, 26, 28 (downstream
+ * s2mpg15-register.h group 7: 1.8 V base, 25 mV steps, 64 selectors)
+ */
+S2MPG10_VOLTAGE_RANGE(s2mpg15_ldo, 26, 1800000, 1800000, 3375000, STEP_25_MV);
+
 #define regulator_desc_s2mpg14_buck(_num, _supply, _range) {		\
 	.name		= "buck"#_num"m",				\
 	.supply_name	= _supply,					\
@@ -2010,6 +2016,10 @@ static const struct regulator_desc s2mpg15_regulators[] = {
 	/* Google gs/3045cdcf: LDO12S group6, CTRL0x3a, selector5:0, enable7. */
 	regulator_desc_s2mpg15_ldo(12, "vinl12s", s2mpg15_ldo_vranges10,
 				   GENMASK(5, 0), S2MPG15_PMIC_L12S_CTRL,
+				   BIT(7)),
+	/* Google gs s2mpg15-regulator.c: LDO26S group7, CTRL0x48, enable7. */
+	regulator_desc_s2mpg15_ldo(26, "vinl26s", s2mpg15_ldo_vranges26,
+				   GENMASK(5, 0), S2MPG15_PMIC_L26S_CTRL,
 				   BIT(7)),
 	/* AoC sensor rails; see regulator_desc_s2mpg15_ldo_en above */
 	regulator_desc_s2mpg15_ldo_en(5),
