@@ -24,6 +24,18 @@
 
 #define SLG51000_MAX_REGULATORS         7
 #define SLG51002_MAX_REGULATORS         8
+#define SLG51002_MAX_RAILS              4
+
+/*
+ * The SLG51002 GPIO1..GPIO4 outputs double as load-switch enables, driven by
+ * MUXARRAY_INPUT_SEL_16..19 bit 0. Except on revision AB their mux registers
+ * only take writes inside the software test mode, entered by writing a
+ * four-byte key to SW_TEST_MODE_1..4 and left by clearing SYSCTL_TEST_EN.
+ */
+#define SLG51002_SYSCTL_TEST_EN         0x1119
+#define SLG51002_SW_TEST_MODE_1         0x111a
+#define SLG51002_SW_TEST_MODE_4         0x111d
+#define SLG51002_REVISION_AB            0xb13103
 
 /* Sized for the larger part; a given chip uses info->n_regulators of these. */
 #define SLG51000_MAX_LDOS               SLG51002_MAX_REGULATORS
@@ -62,6 +74,9 @@ struct slg51000_evt_sta {
  *	strapped into bypass.  Bypass turns an LDO into a pass-through of its
  *	input, so a driver that missed the strap would report a regulated
  *	voltage the rail does not have.
+ * @rail_desc: on/off descriptors for the GPIO outputs used as load-switch
+ *	enables, @n_rails of them (SLG51002 only)
+ * @n_rails: number of GPIO output rails, 0 on the SLG51000
  */
 struct slg51000_chip_info {
 	const struct regmap_config *regmap_cfg;
@@ -70,6 +85,8 @@ struct slg51000_chip_info {
 	const unsigned int *min_regs;
 	const unsigned int *trim2_regs;
 	unsigned int n_regulators;
+	const struct regulator_desc *rail_desc;
+	unsigned int n_rails;
 	bool ldo12_vrange;
 };
 
@@ -81,6 +98,8 @@ struct slg51000 {
 	struct regulator_dev *rdev[SLG51000_MAX_LDOS];
 	struct gpio_desc *cs_gpiod;
 	int chip_irq;
+	u32 chip_id;
+	bool rail_test_mode;
 };
 
 static const struct slg51000_evt_sta slg51000_es_reg[] = {
@@ -284,6 +303,9 @@ static const struct regmap_range slg51002_writeable_ranges[] = {
 	regmap_reg_range(SLG51002_LDO8_VSEL, SLG51002_LDO8_VSEL),
 	regmap_reg_range(SLG51002_LDO8_MINV, SLG51002_LDO8_MAXV),
 	regmap_reg_range(SLG51002_LDO8_IRQ_MASK, SLG51002_LDO8_IRQ_MASK),
+	regmap_reg_range(SLG51002_SYSCTL_TEST_EN, SLG51002_SW_TEST_MODE_4),
+	regmap_reg_range(SLG51000_MUXARRAY_INPUT_SEL_16,
+			 SLG51000_MUXARRAY_INPUT_SEL_19),
 	regmap_reg_range(SLG51000_OTP_IRQ_MASK, SLG51000_OTP_IRQ_MASK),
 };
 
@@ -397,6 +419,47 @@ static const struct regulator_ops slg51000_switch_ops = {
 	.is_enabled = regulator_is_enabled_regmap,
 };
 
+static int slg51002_rail_set(struct regulator_dev *rdev, bool on)
+{
+	static const u8 key[] = { 0x45, 0x53, 0x54, 0x4d };
+	struct slg51000 *chip = rdev_get_drvdata(rdev);
+	int ret, err;
+
+	if (chip->rail_test_mode) {
+		ret = regmap_bulk_write(chip->regmap, SLG51002_SW_TEST_MODE_1,
+					key, ARRAY_SIZE(key));
+		if (ret < 0)
+			return ret;
+	}
+
+	ret = on ? regulator_enable_regmap(rdev) :
+		   regulator_disable_regmap(rdev);
+
+	if (chip->rail_test_mode) {
+		err = regmap_write(chip->regmap, SLG51002_SYSCTL_TEST_EN, 0);
+		if (!ret)
+			ret = err;
+	}
+
+	return ret;
+}
+
+static int slg51002_rail_enable(struct regulator_dev *rdev)
+{
+	return slg51002_rail_set(rdev, true);
+}
+
+static int slg51002_rail_disable(struct regulator_dev *rdev)
+{
+	return slg51002_rail_set(rdev, false);
+}
+
+static const struct regulator_ops slg51002_rail_ops = {
+	.enable = slg51002_rail_enable,
+	.disable = slg51002_rail_disable,
+	.is_enabled = regulator_is_enabled_regmap,
+};
+
 static int slg51000_of_parse_cb(struct device_node *np,
 				const struct regulator_desc *desc,
 				struct regulator_config *config)
@@ -466,6 +529,25 @@ static const struct regulator_desc slg51002_regls_desc[SLG51002_MAX_REGULATORS] 
 			     SLG51002_LDO8_VSEL),
 };
 
+#define SLG51002_RAIL_DESC(_n, _reg) {					\
+		.name = "gpio" #_n,					\
+		.id = SLG51002_MAX_REGULATORS + (_n) - 1,		\
+		.of_match = of_match_ptr("gpio" #_n),			\
+		.regulators_node = of_match_ptr("regulators"),		\
+		.ops = &slg51002_rail_ops,				\
+		.enable_reg = _reg,					\
+		.enable_mask = BIT(0),					\
+		.type = REGULATOR_VOLTAGE,				\
+		.owner = THIS_MODULE,					\
+	}
+
+static const struct regulator_desc slg51002_rail_desc[SLG51002_MAX_RAILS] = {
+	SLG51002_RAIL_DESC(1, SLG51000_MUXARRAY_INPUT_SEL_16),
+	SLG51002_RAIL_DESC(2, SLG51000_MUXARRAY_INPUT_SEL_17),
+	SLG51002_RAIL_DESC(3, SLG51000_MUXARRAY_INPUT_SEL_18),
+	SLG51002_RAIL_DESC(4, SLG51000_MUXARRAY_INPUT_SEL_19),
+};
+
 static const struct slg51000_chip_info slg51000_chip_info = {
 	.regmap_cfg	= &slg51000_regmap_config,
 	.rdesc		= slg51000_regls_desc,
@@ -483,6 +565,8 @@ static const struct slg51000_chip_info slg51002_chip_info = {
 	.min_regs	= slg51002_min_regs,
 	.trim2_regs	= slg51002_trim2_regs,
 	.n_regulators	= SLG51002_MAX_REGULATORS,
+	.rail_desc	= slg51002_rail_desc,
+	.n_rails	= SLG51002_MAX_RAILS,
 };
 
 static int slg51000_regulator_init(struct slg51000 *chip)
@@ -578,6 +662,17 @@ register_it:
 				rdesc->name, ret);
 			return ret;
 		}
+	}
+
+	for (id = 0; id < info->n_rails; id++) {
+		struct regulator_dev *rdev;
+
+		rdev = devm_regulator_register(chip->dev, &info->rail_desc[id],
+					       &config);
+		if (IS_ERR(rdev))
+			return dev_err_probe(chip->dev, PTR_ERR(rdev),
+					     "Failed to register %s\n",
+					     info->rail_desc[id].name);
 	}
 
 	return 0;
@@ -682,7 +777,8 @@ static int slg51000_i2c_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct slg51000 *chip;
-	struct gpio_desc *cs_gpiod;
+	struct gpio_desc *cs_gpiod, *gpiod;
+	u8 id[3];
 	int error, ret;
 
 	chip = devm_kzalloc(dev, sizeof(struct slg51000), GFP_KERNEL);
@@ -703,6 +799,23 @@ static int slg51000_i2c_probe(struct i2c_client *client)
 					 sizeof(*chip->rdesc), GFP_KERNEL);
 	if (!chip->rdesc)
 		return -ENOMEM;
+
+	/*
+	 * Boards that switch the PMIC's input rails (on the Pixel 8 Pro a
+	 * buck-boost and a buck enabled from s2mpg15 GPIOs) bring them up
+	 * before chip select, 2 ms apart, as the downstream driver does.
+	 */
+	gpiod = devm_gpiod_get_optional(dev, "dlg,bb", GPIOD_OUT_HIGH);
+	if (IS_ERR(gpiod))
+		return PTR_ERR(gpiod);
+	if (gpiod)
+		usleep_range(2000, 2100);
+
+	gpiod = devm_gpiod_get_optional(dev, "dlg,buck", GPIOD_OUT_HIGH);
+	if (IS_ERR(gpiod))
+		return PTR_ERR(gpiod);
+	if (gpiod)
+		usleep_range(2000, 2100);
 
 	cs_gpiod = devm_gpiod_get_optional(dev, "dlg,cs",
 					   GPIOD_OUT_HIGH |
@@ -727,6 +840,15 @@ static int slg51000_i2c_probe(struct i2c_client *client)
 			error);
 		return error;
 	}
+
+	ret = regmap_bulk_read(chip->regmap, SLG51000_SYSCTL_PATN_ID_B0, id,
+			       ARRAY_SIZE(id));
+	if (ret < 0)
+		return dev_err_probe(dev, ret, "Failed to read the chip ID\n");
+	chip->chip_id = id[2] << 16 | id[1] << 8 | id[0];
+	chip->rail_test_mode = chip->info->n_rails &&
+			       chip->chip_id != SLG51002_REVISION_AB;
+	dev_info(dev, "chip ID 0x%06x\n", chip->chip_id);
 
 	ret = slg51000_regulator_init(chip);
 	if (ret < 0) {
