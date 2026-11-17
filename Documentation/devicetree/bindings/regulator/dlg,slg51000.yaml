@@ -12,7 +12,8 @@ maintainers:
 
 description: |
   The SLG51000 has seven LDOs; the SLG51002 has eight, and pairs LDO1 and LDO2
-  on a shared input pin.
+  on a shared input pin. The SLG51002 also has four GPIO outputs that boards
+  use as load-switch enables; they are described as on/off regulators.
 
 properties:
   compatible:
@@ -30,6 +31,18 @@ properties:
     maxItems: 1
     description:
       GPIO for chip select
+
+  dlg,bb-gpios:
+    maxItems: 1
+    description:
+      GPIO enabling the buck-boost converter that feeds the LDO inputs. It is
+      raised before chip select.
+
+  dlg,buck-gpios:
+    maxItems: 1
+    description:
+      GPIO enabling the buck converter that feeds the LDO inputs. It is
+      raised after dlg,bb-gpios and before chip select.
 
   vin1_2-supply:
     description:
@@ -76,6 +89,16 @@ properties:
         required:
           - regulator-name
 
+      "^gpio[1-4]$":
+        type: object
+        $ref: /schemas/regulator/regulator.yaml#
+        unevaluatedProperties: false
+        description:
+          GPIO output used as an on/off load-switch enable
+
+        required:
+          - regulator-name
+
 required:
   - compatible
   - reg
@@ -88,9 +111,13 @@ allOf:
           const: dlg,slg51000
     then:
       properties:
+        dlg,bb-gpios: false
+        dlg,buck-gpios: false
         vin1_2-supply: false
         vin8-supply: false
         regulators:
+          patternProperties:
+            "^gpio[1-4]$": false
           properties:
             ldo8: false
 
@@ -153,6 +180,33 @@ examples:
                     regulator-name = "slg51000_b_ldo7";
                     regulator-min-microvolt = <1200000>;
                     regulator-max-microvolt = <3750000>;
+                };
+            };
+        };
+    };
+
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        pmic@75 {
+            compatible = "dlg,slg51002";
+            reg = <0x75>;
+            dlg,cs-gpios = <&pmic_gpio 0 GPIO_ACTIVE_HIGH>;
+            dlg,bb-gpios = <&pmic_gpio 1 GPIO_ACTIVE_HIGH>;
+            dlg,buck-gpios = <&pmic_gpio 3 GPIO_ACTIVE_HIGH>;
+
+            regulators {
+                ldo8 {
+                    regulator-name = "cam_ldo8";
+                    regulator-min-microvolt = <970000>;
+                    regulator-max-microvolt = <970000>;
+                };
+
+                gpio3 {
+                    regulator-name = "cam_gpio3";
                 };
             };
         };
