@@ -117,7 +117,17 @@ static u32 lv2ent_offset(sysmmu_iova_t iova)
 	return (iova >> SPAGE_ORDER) & (NUM_LV2ENTRIES - 1);
 }
 
-#define LV1TABLE_SIZE (NUM_LV1ENTRIES * sizeof(sysmmu_pte_t))
+/*
+ * A System MMU v9 PMMU can be built with a 36-bit input address, and then
+ * its walker indexes a first-level table of 64Ki entries (VA[35:20]) that
+ * must be aligned to its own size; the vendor driver allocates 256 KiB
+ * tables aligned to 256 KiB for every v9 unit.  With the 16 KiB table the
+ * walker reads outside it and reports a page fault on a mapped IOVA.  The
+ * domain is still 32-bit: only the first NUM_LV1ENTRIES entries are ever
+ * used, the rest stay pointing at the zero second-level table.
+ */
+#define NUM_LV1ENTRIES_V9 65536
+static unsigned int lv1_entries = NUM_LV1ENTRIES;
 #define LV2TABLE_SIZE (NUM_LV2ENTRIES * sizeof(sysmmu_pte_t))
 
 #define SPAGES_PER_LPAGE (LPAGE_SIZE / SPAGE_SIZE)
@@ -265,7 +275,8 @@ struct exynos_iommu_owner {
  */
 struct exynos_iommu_domain {
 	struct list_head clients; /* list of sysmmu_drvdata.domain_node */
-	sysmmu_pte_t *pgtable;	/* lv1 page table, 16KB */
+	sysmmu_pte_t *pgtable;	/* lv1 page table, 16KB (256KB with v9) */
+	unsigned int lv1_entries; /* entries in @pgtable */
 	short *lv2entcnt;	/* free lv2 entry counter for each section */
 	spinlock_t lock;	/* lock for modifying list of clients */
 	spinlock_t pgtablelock;	/* lock for modifying page table @ pgtable */
@@ -934,6 +945,9 @@ static int exynos_sysmmu_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_pm_disable;
 
+	if (MMU_MAJ_VER(data->version) == 9)
+		lv1_entries = NUM_LV1ENTRIES_V9;
+
 	if (PG_ENT_SHIFT < 0) {
 		if (MMU_MAJ_VER(data->version) < 5) {
 			PG_ENT_SHIFT = SYSMMU_PG_ENT_SHIFT;
@@ -1053,7 +1067,10 @@ static struct iommu_domain *exynos_iommu_domain_alloc_paging(struct device *dev)
 	if (!domain)
 		return NULL;
 
-	domain->pgtable = iommu_alloc_pages_sz(GFP_KERNEL, SZ_16K);
+	domain->lv1_entries = lv1_entries;
+	domain->pgtable = iommu_alloc_pages_sz(GFP_KERNEL,
+					       domain->lv1_entries *
+					       sizeof(sysmmu_pte_t));
 	if (!domain->pgtable)
 		goto err_pgtable;
 
@@ -1062,10 +1079,11 @@ static struct iommu_domain *exynos_iommu_domain_alloc_paging(struct device *dev)
 		goto err_counter;
 
 	/* Workaround for System MMU v3.3 to prevent caching 1MiB mapping */
-	for (i = 0; i < NUM_LV1ENTRIES; i++)
+	for (i = 0; i < domain->lv1_entries; i++)
 		domain->pgtable[i] = ZERO_LV2LINK;
 
-	handle = dma_map_single(dma_dev, domain->pgtable, LV1TABLE_SIZE,
+	handle = dma_map_single(dma_dev, domain->pgtable,
+				domain->lv1_entries * sizeof(sysmmu_pte_t),
 				DMA_TO_DEVICE);
 	/* For mapping page table entries we rely on dma == phys */
 	BUG_ON(handle != virt_to_phys(domain->pgtable));
@@ -1115,7 +1133,8 @@ static void exynos_iommu_domain_free(struct iommu_domain *iommu_domain)
 
 	spin_unlock_irqrestore(&domain->lock, flags);
 
-	dma_unmap_single(dma_dev, virt_to_phys(domain->pgtable), LV1TABLE_SIZE,
+	dma_unmap_single(dma_dev, virt_to_phys(domain->pgtable),
+			 domain->lv1_entries * sizeof(sysmmu_pte_t),
 			 DMA_TO_DEVICE);
 
 	for (i = 0; i < NUM_LV1ENTRIES; i++)
