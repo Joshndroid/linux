@@ -40,6 +40,9 @@
 #define CFG_ALRT_BIT_ENBL	(1 << 2)
 #define CFG2_DSOCI_BIT_ENBL	(1 << 7)
 
+/* ALRT update period of the MAX77759 gauge, with margin */
+#define MAX77759_ALRT_UPDATE_MS	400
+
 #define VFSOC0_LOCK		0x0000
 #define VFSOC0_UNLOCK		0x0080
 #define MODEL_UNLOCK1	0X0059
@@ -1083,6 +1086,17 @@ static irqreturn_t max17042_thread_handler(int id, void *dev)
 			  0xFFFF & ~(STATUS_POR_BIT | STATUS_BST_BIT));
 
 	power_supply_changed(chip->battery);
+
+	/*
+	 * The MAX77759's gauge only updates its ALRT output once per task
+	 * period (about 351 ms), so the level interrupt stays asserted for up
+	 * to that long after Status was cleared and would re-enter this
+	 * handler some 140 times. Keep the line masked until the gauge has
+	 * seen the cleared Status.
+	 */
+	if (chip->chip_type == MAXIM_DEVICE_TYPE_MAX77759)
+		msleep(MAX77759_ALRT_UPDATE_MS);
+
 	return IRQ_HANDLED;
 }
 
