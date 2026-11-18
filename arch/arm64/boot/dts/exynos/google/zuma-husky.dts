@@ -323,6 +323,8 @@
 		interrupts-extended = <&gpa7 7 IRQ_TYPE_LEVEL_LOW>;
 		/* maxim,rsense-default = <500> (10 uOhm units) */
 		shunt-resistor-micro-ohms = <5000>;
+		/* the charger cell's power supply takes the PMIC's node */
+		power-supplies = <&max77759>;
 	};
 
 	/*
@@ -364,7 +366,7 @@
 	 * neither the bootloader nor this does, so stay at the bootloader's
 	 * values.
 	 */
-	pmic@66 {
+	max77759: pmic@66 {
 		compatible = "maxim,max77759";
 		reg = <0x66>;
 		pinctrl-0 = <&if_pmic_int>;
