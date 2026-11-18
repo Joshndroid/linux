@@ -134,6 +134,7 @@ static int max17042_get_temperature(struct max17042_chip *chip, int *temp)
 
 static int max17042_get_status(struct max17042_chip *chip, int *status)
 {
+	union power_supply_propval supplier_status;
 	int ret, charge_full, charge_now;
 	int current_now;
 	u32 data;
@@ -170,6 +171,20 @@ static int max17042_get_status(struct max17042_chip *chip, int *status)
 	}
 	if (ret == 0) {
 		*status = POWER_SUPPLY_STATUS_DISCHARGING;
+		return 0;
+	}
+
+	/*
+	 * A charger that has finished charging says so. The gauge's RepCap
+	 * can stay further below FullCAP than the threshold below after the
+	 * charge is done, and the current is then about zero, so it would
+	 * report Charging or Discharging with the battery full.
+	 */
+	ret = power_supply_get_property_from_supplier(chip->battery,
+						      POWER_SUPPLY_PROP_STATUS,
+						      &supplier_status);
+	if (!ret && supplier_status.intval == POWER_SUPPLY_STATUS_FULL) {
+		*status = POWER_SUPPLY_STATUS_FULL;
 		return 0;
 	}
 
