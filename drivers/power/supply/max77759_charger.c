@@ -310,7 +310,8 @@ static int get_float_voltage(struct max77759_charger *chg)
 					   ARRAY_SIZE(chg_cv_prm_ranges),
 					   regval, &val);
 
-	return ret ? ret : val;
+	/* chg_cv_prm_ranges is in mV, the property in uV */
+	return ret ? ret : val * 1000;
 }
 
 static int set_float_voltage_limit(struct max77759_charger *chg, u32 fv_mv)
