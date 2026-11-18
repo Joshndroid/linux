@@ -102,8 +102,12 @@ static int charger_input_valid(struct max77759_charger *chg)
 	if (ret)
 		return ret;
 
-	return (val & MAX77759_CHGR_REG_CHG_INT_CHG) &&
-		(val & MAX77759_CHGR_REG_CHG_INT_CHGIN);
+	/*
+	 * Only CHGIN_OK says whether the input is valid. CHG_OK also drops
+	 * while the charger is done or has suspended charging with the cable
+	 * still plugged in.
+	 */
+	return !!(val & MAX77759_CHGR_REG_CHG_INT_CHGIN);
 }
 
 static int get_online(struct max77759_charger *chg)
