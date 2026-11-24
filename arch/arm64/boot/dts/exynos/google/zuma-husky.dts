@@ -465,10 +465,15 @@
 };
 
 / {
-	/* The AoC sensor hub (com.google.usf service), bridged to IIO. */
+	/*
+	 * The AoC sensor hub (com.google.usf service), bridged to IIO.  It
+	 * follows the panel because the proximity sensor under it needs the
+	 * display state.
+	 */
 	aoc_usf: aoc-usf {
 		compatible = "google,aoc-usf";
 		google,aoc = <&aoc>;
+		panel = <&panel0>;
 	};
 
 	/*
