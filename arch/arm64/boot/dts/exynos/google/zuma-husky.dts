@@ -162,6 +162,13 @@
 		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
 	};
 
+	/* NFC_IRQ, XEINT_20 (zuma-board-nfc.dtsi) */
+	nfc_int: nfc-int-pins {
+		samsung,pins = "gpa7-6";
+		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+	};
+
 	/* Haptics IRQ, XEINT_11 (zuma-shusky-haptics.dtsi hapt_amp1_irq) */
 	hapt_amp1_irq: hapt-amp1-irq-pins {
 		samsung,pins = "gpa6-3";
@@ -174,6 +181,13 @@
 	/* Haptics reset (active low) and trigger, XHSI1_GPIO13 / GPIO10 */
 	hapt_amp1_rst: hapt-amp1-rst-pins {
 		samsung,pins = "gph2-3";
+		samsung,pin-function = <GS101_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
+	};
+
+	/* NFC reset, active high (zuma-board-nfc.dtsi) */
+	nfc_rst: nfc-rst-pins {
+		samsung,pins = "gph1-6";
 		samsung,pin-function = <GS101_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
 	};
@@ -261,8 +275,19 @@
 };
 
 &hsi2c_0 {
-	clock-frequency = <1000000>;
+	clock-frequency = <400000>;
 	status = "okay";
+
+	nfc@8 {
+		compatible = "st,st54l-i2c";
+		reg = <0x08>;
+		pinctrl-0 = <&nfc_int>, <&nfc_rst>;
+		pinctrl-names = "default";
+		interrupts-extended = <&gpa7 6 IRQ_TYPE_LEVEL_HIGH>;
+		reset-gpios = <&gph1 6 GPIO_ACTIVE_HIGH>;
+		/* Stock routes the ST54L RF reference through PMU CLKOUT1. */
+		clocks = <&pmu_system_controller 1>;
+	};
 
 	haptics@43 {
 		compatible = "cirrus,cs40l26a";
