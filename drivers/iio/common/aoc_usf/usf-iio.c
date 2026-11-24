@@ -67,12 +67,14 @@
 
 /*
  * What the AoC is told about the panel.  Its under-display TMD3719 driver
- * times proximity bursts to the panel and reports nothing while the panel is
- * on until it knows the panel's state and refresh rate.  The hk3 panel's
- * preferred mode is 120 Hz; the light-compensation terms are the registry's
- * fallbacks (luma 128, no measured leakage).
+ * times its proximity and light measurements to the panel, and while the
+ * panel is lit reports neither until it knows the panel is on (status 1;
+ * status 4 is local high-brightness mode, for the fingerprint sensor, during
+ * which it holds the light sensor back).  The hk3 panel's preferred mode is
+ * 120 Hz; the light-compensation terms are the registry's fallbacks (luma
+ * 128, no measured leakage).
  */
-#define USF_DISP_STATUS_ON	4
+#define USF_DISP_STATUS_ON	1
 #define USF_DISP_REFRESH_HZ	120
 #define USF_DISP_LUMA_BITS	0x43000000	/* 128.0f */
 
@@ -734,8 +736,6 @@ static int usf_start_sampling(struct usf_sensor *s)
 
 	dev_info(usf->dev, "%s streaming: sampling_id=%u period=%lld ns\n",
 		 s->indio->name, sid, period_ns);
-	if (s->proximity)
-		schedule_work(&usf->disp_work);
 	return 0;
 }
 
@@ -754,8 +754,6 @@ static int usf_stop_sampling(struct usf_sensor *s)
 		usf_session_stop_sampling(usf->usf, s->handle, sid);
 	mutex_unlock(&usf->stream_lock);
 
-	if (sid && s->proximity)
-		schedule_work(&usf->disp_work);
 	return 0;
 }
 
@@ -943,14 +941,8 @@ static void usf_iio_disp_work(struct work_struct *work)
 	if (!usf->enumerated)
 		return;
 
-	/*
-	 * Report the panel on only while proximity streams.  Told the panel is
-	 * on, the AoC also holds back the light sensor, which it otherwise
-	 * reports with the panel on (uncompensated); proximity is what needs
-	 * the panel state.
-	 */
 	spin_lock_irq(&usf->disp_lock);
-	if (usf->panel_on && usf->prox && READ_ONCE(usf->prox->sampling_id)) {
+	if (usf->panel_on) {
 		di.status = USF_DISP_STATUS_ON;
 		di.dbv = usf->dbv;
 	}
