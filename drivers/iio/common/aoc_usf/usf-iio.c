@@ -17,6 +17,7 @@
 
 #define pr_fmt(fmt) "usf-iio: " fmt
 
+#include <linux/backlight.h>
 #include <linux/ctype.h>
 #include <linux/device.h>
 #include <linux/err.h>
@@ -30,6 +31,8 @@
 #include <linux/timekeeping.h>
 #include <linux/unaligned.h>
 #include <linux/workqueue.h>
+
+#include <drm/drm_panel.h>
 
 #include <linux/iio/buffer.h>
 #include <linux/iio/iio.h>
@@ -56,12 +59,34 @@
 #define USF_MAX_DEV		12	/* max IIO devices registered */
 
 /*
- * The bridge asks for USF_MODE_FUSED for every sensor it exposes. The
- * downstream HAL distinguishes USF_MODE_PHYSICAL for on-chip parts, but the
- * fused mode streams them all correctly and is what this driver was validated
- * with; the distinction only matters for wake-up gestures, which are not IIO.
+ * The bridge asks for USF_MODE_FUSED unless a sensor's map says otherwise.
+ * The downstream HAL distinguishes USF_MODE_PHYSICAL for on-chip parts; fused
+ * streams most of them correctly, but husky's TMD3719 proximity sensor only
+ * reports in physical mode.
  */
-#define USF_IIO_MODE		USF_MODE_FUSED
+
+/*
+ * What the AoC is told about the panel.  Its under-display TMD3719 driver
+ * times proximity bursts to the panel and reports nothing while the panel is
+ * on until it knows the panel's state and refresh rate.  The hk3 panel's
+ * preferred mode is 120 Hz; the light-compensation terms are the registry's
+ * fallbacks (luma 128, no measured leakage).
+ */
+#define USF_DISP_STATUS_ON	4
+#define USF_DISP_REFRESH_HZ	120
+#define USF_DISP_LUMA_BITS	0x43000000	/* 128.0f */
+
+/*
+ * Proximity streams only while someone reads it: a raw read starts it, and it
+ * stops this long after the last read unless its buffer is enabled.
+ */
+#define USF_PROX_IDLE_MS	5000
+
+/*
+ * The TMD3719's range as the AoC reports it: a distance of 0 cm (near) or
+ * 5 cm (nothing in range).
+ */
+#define USF_PROX_RANGE_CM	5
 
 static bool autopoll = true;
 module_param(autopoll, bool, 0644);
@@ -98,6 +123,18 @@ struct usf_iio {
 	 */
 	struct mutex stream_lock;
 
+	/* The panel we follow, and what the AoC was last told about it. */
+	struct drm_panel_follower follower;
+	bool following;
+	struct work_struct disp_work;
+	spinlock_t disp_lock;	/* panel_on / dbv, written by follower callbacks */
+	bool panel_on;
+	u32 dbv;
+
+	/* The proximity sensor, if exposed, and its idle stop. */
+	struct usf_sensor *prox;
+	struct delayed_work prox_idle_work;
+
 	/* Registered IIO devices, one per exposed sensor. */
 	struct usf_sensor *sensors[USF_MAX_DEV];
 	int nsensors;
@@ -115,6 +152,8 @@ struct usf_sensor {
 	s64 period_ns;
 	int samp_freq;		/* requested rate in Hz (sampling_frequency) */
 	u8 ndata;		/* data channels (1 scalar, 3 vector) */
+	u8 mode;		/* enum usf_sampling_mode for CreateSampling */
+	bool proximity;		/* distance in, near-ness out (see below) */
 
 	/*
 	 * Scale: samples quantise to raw = round(value / resolution), so raw is
@@ -240,8 +279,43 @@ static const struct iio_chan_spec usf_magn_channels[] = {
 static const struct iio_chan_spec usf_light_channels[] = {
 	USF_SCALAR_CHANNELS(IIO_LIGHT),
 };
+/*
+ * Proximity reads 0 with nothing in range and up to USF_PROX_RANGE_CM as
+ * something comes closer; anything at or above 1 is near.  iio-sensor-proxy
+ * reads this rather than guessing a threshold (and adds its own hysteresis
+ * to it, so a near reading has to be well above it).
+ */
+static ssize_t usf_prox_near_level(struct iio_dev *indio_dev, uintptr_t priv,
+				   const struct iio_chan_spec *chan, char *buf)
+{
+	return sysfs_emit(buf, "1\n");
+}
+
+static const struct iio_chan_spec_ext_info usf_prox_ext_info[] = {
+	{
+		.name = "nearlevel",
+		.shared = IIO_SEPARATE,
+		.read = usf_prox_near_level,
+	},
+	{ }
+};
+
 static const struct iio_chan_spec usf_prox_channels[] = {
-	USF_SCALAR_CHANNELS(IIO_PROXIMITY),
+	{
+		.type = IIO_PROXIMITY,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
+		.info_mask_shared_by_type = BIT(IIO_CHAN_INFO_SCALE),
+		.info_mask_shared_by_all = BIT(IIO_CHAN_INFO_SAMP_FREQ),
+		.ext_info = usf_prox_ext_info,
+		.scan_index = 0,
+		.scan_type = {
+			.sign = 's',
+			.realbits = 32,
+			.storagebits = 32,
+			.endianness = IIO_LE,
+		},
+	},
+	IIO_CHAN_SOFT_TIMESTAMP(1),
 };
 static const struct iio_chan_spec usf_pressure_channels[] = {
 	USF_SCALAR_CHANNELS(IIO_PRESSURE),
@@ -289,6 +363,7 @@ static const struct usf_type_map {
 	 * temperature degC -> milli-degC is *1000, so 1e12.
 	 */
 	u64 unit_nano;
+	u8 mode;		/* 0: USF_MODE_FUSED */
 } usf_type_maps[] = {
 	{ "Accelerometer", "usf_accel", usf_accel_channels,
 	  ARRAY_SIZE(usf_accel_channels), 3, usf_scan_masks_3axis, 1000000000ULL },
@@ -301,9 +376,10 @@ static const struct usf_type_map {
 	/* "Proximity" alone also matches gesture/voice/AAD sensors; be specific */
 	{ "TMD3733 Proximity", "usf_prox", usf_prox_channels,
 	  ARRAY_SIZE(usf_prox_channels), 1, usf_scan_masks_scalar, 1000000000ULL },
-	/* Pixel 8 Pro (husky) */
+	/* Pixel 8 Pro (husky): reports only when streamed physical */
 	{ "TMD3719 Proximity", "usf_prox", usf_prox_channels,
-	  ARRAY_SIZE(usf_prox_channels), 1, usf_scan_masks_scalar, 1000000000ULL },
+	  ARRAY_SIZE(usf_prox_channels), 1, usf_scan_masks_scalar, 1000000000ULL,
+	  USF_MODE_PHYSICAL },
 	{ "Barometer", "usf_baro", usf_pressure_channels,
 	  ARRAY_SIZE(usf_pressure_channels), 1, usf_scan_masks_scalar, 100000000ULL },
 	/* the same sensor, named after the part rather than the function */
@@ -353,6 +429,9 @@ static int usf_read_raw(struct iio_dev *indio_dev,
 			if (ret)
 				return ret;
 		}
+		if (s->proximity)
+			mod_delayed_work(system_wq, &s->usf->prox_idle_work,
+					 msecs_to_jiffies(USF_PROX_IDLE_MS));
 
 		if (!READ_ONCE(s->have_last))
 			return -EAGAIN;
@@ -600,6 +679,14 @@ static void usf_handle_sample(struct usf_iio *usf, const u8 *pay, u32 plen)
 		for (d = 0; d < (u32)n; d++)
 			scan.chan[d] = usf_scale_sample(match,
 				get_unaligned_le32(pay + off + 8 + d * 4));
+		/*
+		 * The AoC reports proximity Android's way, as a distance in cm
+		 * that is 0 when something is near and the sensor's range when
+		 * not.  IIO's in_proximity is the other way up -- larger is
+		 * nearer -- so report how far inside that range the object is.
+		 */
+		if (match->proximity)
+			scan.chan[0] = max(USF_PROX_RANGE_CM - scan.chan[0], 0);
 
 		memcpy(match->last, scan.chan, sizeof(match->last));
 		match->have_last = true;
@@ -632,7 +719,7 @@ static int usf_start_sampling(struct usf_sensor *s)
 	s->client_id = 0xC0DE0000u | s->handle;
 
 	mutex_lock(&usf->stream_lock);
-	ret = usf_session_start_sampling(usf->usf, s->handle, USF_IIO_MODE,
+	ret = usf_session_start_sampling(usf->usf, s->handle, s->mode,
 					 period_ns, s->client_id, &sid);
 	if (!ret) {
 		s->period_ns = period_ns;
@@ -647,6 +734,8 @@ static int usf_start_sampling(struct usf_sensor *s)
 
 	dev_info(usf->dev, "%s streaming: sampling_id=%u period=%lld ns\n",
 		 s->indio->name, sid, period_ns);
+	if (s->proximity)
+		schedule_work(&usf->disp_work);
 	return 0;
 }
 
@@ -665,7 +754,19 @@ static int usf_stop_sampling(struct usf_sensor *s)
 		usf_session_stop_sampling(usf->usf, s->handle, sid);
 	mutex_unlock(&usf->stream_lock);
 
+	if (sid && s->proximity)
+		schedule_work(&usf->disp_work);
 	return 0;
+}
+
+/* Stop a proximity stream nobody has read for a while. */
+static void usf_iio_prox_idle_work(struct work_struct *work)
+{
+	struct usf_iio *usf = container_of(to_delayed_work(work),
+					   struct usf_iio, prox_idle_work);
+
+	if (usf->prox && !iio_buffer_enabled(usf->prox->indio))
+		usf_stop_sampling(usf->prox);
 }
 
 static int usf_buffer_postenable(struct iio_dev *indio_dev)
@@ -724,6 +825,8 @@ static int usf_register_sensor(struct usf_iio *usf, u32 handle,
 	s->indio = indio;
 	s->handle = handle;
 	s->ndata = map->ndata;
+	s->mode = map->mode ? map->mode : USF_MODE_FUSED;
+	s->proximity = map->channels == usf_prox_channels;
 	s->samp_freq = rate > 0 ? rate : 50;
 	usf_set_scale(s, map, res_bits);
 
@@ -743,6 +846,8 @@ static int usf_register_sensor(struct usf_iio *usf, u32 handle,
 		return ret;
 
 	usf->sensors[usf->nsensors++] = s;
+	if (s->proximity && !usf->prox)
+		usf->prox = s;
 	dev_info(usf->dev,
 		 "registered %s for USF '%s' (handle 0x%x) scale=%llu.%09llu%s\n",
 		 map->iio_name, name, handle, s->scale_nano / USF_NANO,
@@ -824,6 +929,70 @@ static bool usf_retry(struct usf_iio *usf, const char *why)
 	return true;
 }
 
+/* Tell the AoC whether the panel is on, once the USF servers are up. */
+static void usf_iio_disp_work(struct work_struct *work)
+{
+	struct usf_iio *usf = container_of(work, struct usf_iio, disp_work);
+	struct usf_display_info di = {
+		.refresh_hz = USF_DISP_REFRESH_HZ,
+		.te2_hz = USF_DISP_REFRESH_HZ,
+		.luma_bits = USF_DISP_LUMA_BITS,
+	};
+	int ret;
+
+	if (!usf->enumerated)
+		return;
+
+	/*
+	 * Report the panel on only while proximity streams.  Told the panel is
+	 * on, the AoC also holds back the light sensor, which it otherwise
+	 * reports with the panel on (uncompensated); proximity is what needs
+	 * the panel state.
+	 */
+	spin_lock_irq(&usf->disp_lock);
+	if (usf->panel_on && usf->prox && READ_ONCE(usf->prox->sampling_id)) {
+		di.status = USF_DISP_STATUS_ON;
+		di.dbv = usf->dbv;
+	}
+	spin_unlock_irq(&usf->disp_lock);
+
+	ret = usf_session_display_info(usf->usf, &di);
+	if (ret)
+		dev_warn_ratelimited(usf->dev,
+				     "could not tell the AoC the display state: %d\n",
+				     ret);
+}
+
+static void usf_iio_set_panel(struct usf_iio *usf, bool on)
+{
+	struct backlight_device *bl = usf->follower.panel->backlight;
+	unsigned long flags;
+
+	spin_lock_irqsave(&usf->disp_lock, flags);
+	usf->panel_on = on;
+	usf->dbv = on && bl ? backlight_get_brightness(bl) : 0;
+	spin_unlock_irqrestore(&usf->disp_lock, flags);
+
+	schedule_work(&usf->disp_work);
+}
+
+static int usf_iio_panel_enabled(struct drm_panel_follower *follower)
+{
+	usf_iio_set_panel(container_of(follower, struct usf_iio, follower), true);
+	return 0;
+}
+
+static int usf_iio_panel_disabling(struct drm_panel_follower *follower)
+{
+	usf_iio_set_panel(container_of(follower, struct usf_iio, follower), false);
+	return 0;
+}
+
+static const struct drm_panel_follower_funcs usf_iio_follower_funcs = {
+	.panel_enabled = usf_iio_panel_enabled,
+	.panel_disabling = usf_iio_panel_disabling,
+};
+
 static void usf_iio_enumerate_work(struct work_struct *work)
 {
 	struct usf_iio *usf = container_of(to_delayed_work(work),
@@ -864,6 +1033,8 @@ static void usf_iio_enumerate_work(struct work_struct *work)
 	usf->enumerated = true;
 
 	usf_enumerate(usf);
+	if (usf->following)
+		schedule_work(&usf->disp_work);
 }
 
 static ssize_t enumerate_store(struct device *dev,
@@ -922,6 +1093,7 @@ static struct device *usf_iio_get_aoc(struct device *dev)
 static int usf_iio_probe(struct platform_device *pdev)
 {
 	struct usf_iio *usf;
+	int ret;
 
 	usf = devm_kzalloc(&pdev->dev, sizeof(*usf), GFP_KERNEL);
 	if (!usf)
@@ -942,8 +1114,26 @@ static int usf_iio_probe(struct platform_device *pdev)
 
 	mutex_init(&usf->stream_lock);
 	spin_lock_init(&usf->sample_lock);
+	spin_lock_init(&usf->disp_lock);
 	INIT_DELAYED_WORK(&usf->enum_work, usf_iio_enumerate_work);
+	INIT_WORK(&usf->disp_work, usf_iio_disp_work);
+	INIT_DELAYED_WORK(&usf->prox_idle_work, usf_iio_prox_idle_work);
 	platform_set_drvdata(pdev, usf);
+
+	/*
+	 * Follow the panel, so the AoC can run its under-display sensors.
+	 * Optional: without a panel the other sensors work as before.
+	 */
+	if (drm_is_panel_follower(&pdev->dev)) {
+		usf->follower.funcs = &usf_iio_follower_funcs;
+		ret = drm_panel_add_follower(&pdev->dev, &usf->follower);
+		if (ret) {
+			put_device(usf->aoc_dev);
+			return dev_err_probe(&pdev->dev, ret,
+					     "cannot follow the panel\n");
+		}
+		usf->following = true;
+	}
 
 	if (autopoll)
 		schedule_delayed_work(&usf->enum_work, 0);
@@ -955,7 +1145,11 @@ static void usf_iio_remove(struct platform_device *pdev)
 {
 	struct usf_iio *usf = platform_get_drvdata(pdev);
 
+	if (usf->following)
+		drm_panel_remove_follower(&usf->follower);
 	cancel_delayed_work_sync(&usf->enum_work);
+	cancel_delayed_work_sync(&usf->prox_idle_work);
+	cancel_work_sync(&usf->disp_work);
 	usf_session_close(usf->usf);
 	put_device(usf->aoc_dev);
 }
