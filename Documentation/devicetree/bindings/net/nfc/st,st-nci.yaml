@@ -56,6 +56,7 @@ if:
         enum:
           - st,st21nfcb-i2c
           - st,st21nfcc-i2c
+          - st,st54l-i2c
 then:
   properties:
     spi-max-frequency: false
