@@ -353,12 +353,11 @@
 	};
 
 	/*
-	 * USB-C: the MAX77759 TCPC as a sink-only, device-only port with PD
-	 * off, and no role-switch/orientation links, so it never sources VBUS
-	 * or moves the dwc3 off the peripheral role. Its job is to tell the
-	 * charger what the source offers (Rp current). Until the charger
-	 * driver loads, charging stays as the bootloader set it. Dual-role,
-	 * PD/PPS and the PCA9468 fast charger come later.
+	 * USB-C: the MAX77759 TCPC remains sink-only and device-only, with no
+	 * role-switch/orientation links, so it never sources VBUS or moves dwc3
+	 * off the peripheral role. Fixed 9 V PD feeds the conservative MAX77759
+	 * buck-charger limits below; dual-role, PPS and the PCA9468 direct
+	 * charger still need their board policy and thermal controls.
 	 */
 	usb-typec@25 {
 		compatible = "maxim,max77759-tcpci", "maxim,max33359";
@@ -375,8 +374,8 @@
 			self-powered;
 			op-sink-microwatt = <2600000>;
 			slow-charger-loop;
-			sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)>;
-			pd-disable;
+			sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)
+				     PDO_FIXED(9000, 2200, 0)>;
 			typec-power-opmode = "default";
 		};
 	};
