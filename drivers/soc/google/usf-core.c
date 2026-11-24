@@ -63,6 +63,7 @@ struct usf_session {
 	u32 registry;
 	u32 sensor_mgr;
 	u32 sample_chan;
+	u32 display_info;
 };
 
 static void usf_session_rx(void *ctx, const void *payload, size_t len)
@@ -303,6 +304,7 @@ void usf_session_close(struct usf_session *s)
 	s->sensor_mgr = 0;
 	s->sample_chan = 0;
 	s->registry = 0;
+	s->display_info = 0;
 }
 EXPORT_SYMBOL_GPL(usf_session_close);
 
@@ -330,6 +332,44 @@ int usf_session_bootstrap(struct usf_session *s)
 }
 EXPORT_SYMBOL_GPL(usf_session_bootstrap);
 
+
+/*
+ * Tell the AoC's Display Info server the panel state.  Resolves the server on
+ * first use; the reply carries no data we use, only its arrival is checked.
+ */
+int usf_session_display_info(struct usf_session *s,
+			     const struct usf_display_info *di)
+{
+	const u8 *req, *resp;
+	size_t reqlen;
+	u32 rlen, blen = 0, txn;
+	int ret;
+
+	if (!s->wake)
+		return -ENODEV;
+	if (!s->display_info)
+		s->display_info = usf_get_server(s, usf_uuid_display_info,
+						 "DisplayInfo");
+	if (!s->display_info)
+		return -ENODEV;
+
+	mutex_lock(&s->ctl_lock);
+	txn = s->txn++;
+	ret = usf_build_display_info(s->fbb, txn, s->display_info, di,
+				     &req, &reqlen);
+	if (!ret)
+		ret = usf_ctl(s, txn, req, reqlen, &resp, &rlen);
+	if (!ret && !usf_resp_body(resp, rlen, &blen))
+		blen = 0;
+	mutex_unlock(&s->ctl_lock);
+
+	dev_dbg(s->dev,
+		"DisplayInfo(status=%u dbv=%u refresh=%u te2=%u pwm=%d) -> %d (resp body %u B)\n",
+		di->status, di->dbv, di->refresh_hz, di->te2_hz, di->pwm, ret,
+		blen);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(usf_session_display_info);
 
 struct device *usf_session_dev(struct usf_session *s)
 {

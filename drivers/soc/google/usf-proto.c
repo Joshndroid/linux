@@ -32,6 +32,10 @@ const u8 usf_uuid_registry[16] = {
 	0xd7, 0x6a, 0x14, 0xcc, 0x26, 0x4d, 0xee, 0xa1,
 	0xc6, 0x40, 0x6f, 0x8b, 0x46, 0x16, 0x82, 0xc0,
 };
+const u8 usf_uuid_display_info[16] = {
+	0xa8, 0x8e, 0xc6, 0x24, 0x10, 0x40, 0x2a, 0xed,
+	0xca, 0xb9, 0xa5, 0xaa, 0xd6, 0xa2, 0xee, 0xd2,
+};
 
 /* ------------------------------------------------------------------ *
  * FlatBuffer builder (back-to-front, per the flatbuffers reference)   *
@@ -343,6 +347,33 @@ int usf_build_get_server(struct usf_fbb *b, u32 txn, const u8 uuid[16],
 		return -EOVERFLOW;
 	memcpy(b->scratch_body, body, blen);
 	return build_request(b, USF_MSG_GET_SERVER, txn, USF_SERVER_MGR_HANDLE,
+			     b->scratch_body, blen, out, out_len);
+}
+
+int usf_build_display_info(struct usf_fbb *b, u32 txn, u32 dst,
+			   const struct usf_display_info *di,
+			   const u8 **out, size_t *out_len)
+{
+	const u8 *body;
+	size_t blen;
+	u32 bt;
+
+	fbb_init(b);
+	fbb_start_table(b);
+	fbb_add_i32(b, 0, di->dbv);		/* fid0 brightness (DBV) */
+	fbb_add_bool(b, 1, di->status);		/* fid1 status:uint8 */
+	fbb_add_i32(b, 2, di->refresh_hz);	/* fid2 refresh rate */
+	fbb_add_bool(b, 3, di->display);	/* fid3 display id:uint8 */
+	fbb_add_i32(b, 4, di->leakage_bits);	/* fid4 leakage:float */
+	fbb_add_i32(b, 5, di->luma_bits);	/* fid5 luma:float */
+	fbb_add_i32(b, 7, di->te2_hz);		/* fid7 TE2 rate */
+	fbb_add_bool(b, 8, (u8)di->pwm);	/* fid8 PWM mode:int8 */
+	bt = fbb_end_table(b);
+	fbb_finish(b, bt, &body, &blen);
+	if (b->overflow || blen > b->cap)
+		return -EOVERFLOW;
+	memcpy(b->scratch_body, body, blen);
+	return build_request(b, USF_MSG_DISPLAY_INFO, txn, dst,
 			     b->scratch_body, blen, out, out_len);
 }
 

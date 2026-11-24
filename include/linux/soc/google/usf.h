@@ -156,5 +156,7 @@ int usf_session_reconfig(struct usf_session *s, u32 handle, u32 sampling_id,
  */
 int usf_session_stop_sampling(struct usf_session *s, u32 handle,
 			      u32 sampling_id);
+int usf_session_display_info(struct usf_session *s,
+			     const struct usf_display_info *di);
 
 #endif /* _SOC_GOOGLE_USF_H_ */

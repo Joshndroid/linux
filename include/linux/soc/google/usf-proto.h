@@ -19,6 +19,7 @@
 extern const u8 usf_uuid_sensor_mgr[16];
 extern const u8 usf_uuid_sample_channel[16];
 extern const u8 usf_uuid_registry[16];
+extern const u8 usf_uuid_display_info[16];
 
 /* UsfMsg.body operation code (msg_id). */
 enum usf_msg_id {
@@ -31,6 +32,7 @@ enum usf_msg_id {
 	USF_MSG_REGISTRY_GET    = 21,
 	USF_MSG_REGISTRY_SET    = 22,
 	USF_MSG_REGISTRY_LOAD_SCRIPT = 24,
+	USF_MSG_DISPLAY_INFO    = 1001,
 };
 
 /* Outer envelope type (UsfMsgOuter.type). */
@@ -128,6 +130,26 @@ int usf_build_load_script(struct usf_fbb *b, u32 txn, u32 reg_handle,
 int usf_build_registry_set(struct usf_fbb *b, u32 txn, u32 reg_handle,
 			   const u8 *path, size_t path_len,
 			   const struct usf_prop *props, unsigned int nprops,
+			   const u8 **out, size_t *out_len);
+/*
+ * Display state for the Display Info server (msg 1001).  The under-display
+ * TMD3719 proximity/ALS driver on the AoC times its bursts to the panel and
+ * waits for this.  @leakage_bits and @luma_bits are IEEE-754 float32 bit
+ * patterns (the kernel has no FP).
+ */
+struct usf_display_info {
+	u32 dbv;		/* panel brightness (DBV) */
+	u8 status;		/* 4 = active, 0 = off */
+	u32 refresh_hz;
+	u8 display;		/* display id, 0 = primary */
+	u32 leakage_bits;
+	u32 luma_bits;
+	u32 te2_hz;
+	s8 pwm;
+};
+
+int usf_build_display_info(struct usf_fbb *b, u32 txn, u32 dst,
+			   const struct usf_display_info *di,
 			   const u8 **out, size_t *out_len);
 int usf_build_fragment(struct usf_fbb *b, u32 total_len, u32 offset,
 		       const u8 *chunk, size_t chunk_len,
