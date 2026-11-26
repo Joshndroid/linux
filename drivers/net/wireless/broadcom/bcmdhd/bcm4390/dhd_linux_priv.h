@@ -458,6 +458,11 @@ typedef struct dhd_info {
 
 
 	struct work_struct dhd_hang_process_work;
+#ifdef DHD_HANG_RECOVERY_REOPEN
+	struct delayed_work dhd_hang_recovery_work;
+	unsigned long hang_recovery_stamp;
+	uint hang_recovery_count;
+#endif /* DHD_HANG_RECOVERY_REOPEN */
 #ifdef DHD_HP2P
 	spinlock_t	hp2p_lock;
 #endif /* DHD_HP2P */

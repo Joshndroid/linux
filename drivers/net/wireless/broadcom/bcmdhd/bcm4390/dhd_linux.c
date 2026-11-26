@@ -398,6 +398,9 @@ extern void dhd_enable_oob_intr(struct dhd_bus *bus, bool enable);
 
 #if defined(OEM_ANDROID)
 static void dhd_hang_process(struct work_struct *work_data);
+#ifdef DHD_HANG_RECOVERY_REOPEN
+static void dhd_hang_recovery(struct work_struct *work);
+#endif /* DHD_HANG_RECOVERY_REOPEN */
 #endif /* OEM_ANDROID */
 
 MODULE_LICENSE("GPL and additional rights");
@@ -10341,6 +10344,9 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 
 #if defined(OEM_ANDROID)
 	INIT_WORK(&dhd->dhd_hang_process_work, dhd_hang_process);
+#ifdef DHD_HANG_RECOVERY_REOPEN
+	INIT_DELAYED_WORK(&dhd->dhd_hang_recovery_work, dhd_hang_recovery);
+#endif /* DHD_HANG_RECOVERY_REOPEN */
 #endif /* OEM_ANDROID */
 
 #ifdef DEBUG_CPU_FREQ
@@ -16267,6 +16273,9 @@ void dhd_detach(dhd_pub_t *dhdp)
 
 #if defined(OEM_ANDROID)
 	dhd_cancel_work_sync(&dhd->dhd_hang_process_work);
+#ifdef DHD_HANG_RECOVERY_REOPEN
+	cancel_delayed_work_sync(&dhd->dhd_hang_recovery_work);
+#endif /* DHD_HANG_RECOVERY_REOPEN */
 #endif /* OEM_ANDROID */
 
 	/* Prefer adding de-init code above this comment unless necessary.
@@ -19199,6 +19208,66 @@ exit:
 #endif /* APF */
 
 #if defined(OEM_ANDROID)
+#ifdef DHD_HANG_RECOVERY_REOPEN
+#define DHD_HANG_RECOVERY_DELAY_MS	1000
+#define DHD_HANG_RECOVERY_WINDOW	(10 * 60 * HZ)
+#define DHD_HANG_RECOVERY_MAX		3
+
+/*
+ * On Android the framework answers a HANG event by restarting Wi-Fi. Without
+ * it nothing does: the interface stays up on a dead dongle (scans fail with
+ * -EAGAIN) until something happens to close it. Close and reopen the primary
+ * interface instead. After a HANG, dhd_stop() powers the dongle off
+ * (wl_accel_force_reg_on) and clears hang_was_sent, and dhd_open() downloads
+ * the firmware again; wpa_supplicant then reconnects as after any link loss.
+ * Give up after DHD_HANG_RECOVERY_MAX restarts within DHD_HANG_RECOVERY_WINDOW
+ * so that a dongle that traps on every start is not restarted forever.
+ */
+static void dhd_hang_recovery(struct work_struct *work)
+{
+	dhd_info_t *dhd;
+	struct net_device *dev;
+	int ret;
+
+	/* Ignore compiler warnings due to -Werror=cast-qual */
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
+	dhd = container_of(to_delayed_work(work), dhd_info_t, dhd_hang_recovery_work);
+	GCC_DIAGNOSTIC_POP();
+
+	dev = dhd_linux_get_primary_netdev(&dhd->pub);
+	if (!dev)
+		return;
+
+	rtnl_lock();
+	/* Someone (userspace) already took the interface down: nothing to do */
+	if (!(dev->flags & IFF_UP) || !dhd->pub.hang_was_sent) {
+		rtnl_unlock();
+		return;
+	}
+	if (!dhd->hang_recovery_count ||
+		time_after(jiffies, dhd->hang_recovery_stamp + DHD_HANG_RECOVERY_WINDOW)) {
+		dhd->hang_recovery_stamp = jiffies;
+		dhd->hang_recovery_count = 0;
+	}
+	if (++dhd->hang_recovery_count > DHD_HANG_RECOVERY_MAX) {
+		DHD_ERROR(("%s: %u firmware hangs within %u s, leaving %s down\n",
+			__FUNCTION__, dhd->hang_recovery_count - 1,
+			DHD_HANG_RECOVERY_WINDOW / HZ, dev->name));
+		dev_close(dev);
+		rtnl_unlock();
+		return;
+	}
+	DHD_PRINT(("%s: restarting %s after firmware hang (reason 0x%x), %u/%u\n",
+		__FUNCTION__, dev->name, dhd->pub.hang_reason,
+		dhd->hang_recovery_count, DHD_HANG_RECOVERY_MAX));
+	dev_close(dev);
+	ret = dev_open(dev, NULL);
+	if (ret)
+		DHD_ERROR(("%s: reopening %s failed: %d\n", __FUNCTION__, dev->name, ret));
+	rtnl_unlock();
+}
+#endif /* DHD_HANG_RECOVERY_REOPEN */
+
 static void dhd_hang_process(struct work_struct *work_data)
 {
 	struct net_device *dev;
@@ -19245,6 +19314,13 @@ static void dhd_hang_process(struct work_struct *work_data)
 #if defined(WL_CFG80211)
 	wl_cfg80211_hang(dev, WLAN_REASON_UNSPECIFIED);
 #endif
+#ifdef DHD_HANG_RECOVERY_REOPEN
+	/* Freezable: never restart the interface in the middle of a system
+	 * suspend or resume; the work runs once tasks are thawed.
+	 */
+	queue_delayed_work(system_freezable_wq, &dhd->dhd_hang_recovery_work,
+		msecs_to_jiffies(DHD_HANG_RECOVERY_DELAY_MS));
+#endif /* DHD_HANG_RECOVERY_REOPEN */
 
 #ifdef IFACE_HANG_FORCE_DEV_CLOSE
 	/*
