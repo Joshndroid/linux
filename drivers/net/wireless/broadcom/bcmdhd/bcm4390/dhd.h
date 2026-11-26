@@ -1470,6 +1470,7 @@ typedef struct dhd_pub {
 	int early_suspended;		/* Early suspend status */
 #if defined(PKT_FILTER_SUPPORT)
 	int dhcp_in_progress;		/* DHCP period */
+	bool subnet_bcast_filter;	/* subnet broadcast discard filter added */
 #endif /* PKT_FILTER_SUPPORT */
 	/* Pkt filter defination */
 	char *pktfilter[100];

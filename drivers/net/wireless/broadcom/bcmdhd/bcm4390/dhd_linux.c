@@ -2382,6 +2382,58 @@ dhd_set_packet_filter(dhd_pub_t *dhd)
 	}
 }
 
+/*
+ * Filter 107 (DISCARD_IPV4_BCAST) discards only the limited broadcast
+ * 255.255.255.255. Access points that convert broadcast to unicast for each
+ * station deliver a subnet-directed broadcast (e.g. 192.168.1.255) to our own
+ * MAC address, so it passes the unicast filter and wakes the host. While the
+ * suspend filters are on, also discard the primary interface's own IPv4
+ * broadcast address. It is read again at every suspend, so it follows the
+ * network the station is on.
+ */
+#define DHD_IP4SUBNET_BCAST_DROP_FILTER_ID	111
+
+static void
+dhd_subnet_bcast_filter(dhd_pub_t *dhd, int value)
+{
+	struct net_device *dev = dhd_linux_get_primary_netdev(dhd);
+	const struct in_ifaddr *ifa;
+	struct in_device *in_dev;
+	__be32 bcast = 0;
+	char filter[64];
+
+	if (!FW_SUPPORTED(dhd, pf6))
+		return;
+	if (dhd->subnet_bcast_filter) {
+		dhd_pktfilter_offload_delete(dhd, DHD_IP4SUBNET_BCAST_DROP_FILTER_ID);
+		dhd->subnet_bcast_filter = FALSE;
+	}
+	if (!value || !dev)
+		return;
+
+	rcu_read_lock();
+	in_dev = __in_dev_get_rcu(dev);
+	if (in_dev) {
+		in_dev_for_each_ifa_rcu(ifa, in_dev) {
+			if (ifa->ifa_broadcast &&
+			    ifa->ifa_broadcast != htonl(INADDR_BROADCAST)) {
+				bcast = ifa->ifa_broadcast;
+				break;
+			}
+		}
+	}
+	rcu_read_unlock();
+	if (!bcast)
+		return;
+
+	snprintf(filter, sizeof(filter), "%d 1 6 IP4_H:16 0xffffffff 0x%08x",
+		DHD_IP4SUBNET_BCAST_DROP_FILTER_ID, ntohl(bcast));
+	dhd_pktfilter_offload_set(dhd, filter);
+	dhd_pktfilter_offload_enable(dhd, filter, 1, dhd_master_mode);
+	dhd->subnet_bcast_filter = TRUE;
+	DHD_PRINT(("%s: discarding %pI4 while suspended\n", __FUNCTION__, &bcast));
+}
+
 void
 dhd_enable_packet_filter(int value, dhd_pub_t *dhd)
 {
@@ -2424,6 +2476,7 @@ dhd_enable_packet_filter(int value, dhd_pub_t *dhd)
 			dhd_pktfilter_offload_enable(dhd, dhd->pktfilter[i],
 				value, dhd_master_mode);
 		}
+		dhd_subnet_bcast_filter(dhd, value);
 	}
 }
 
